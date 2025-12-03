@@ -1217,7 +1217,7 @@ def export_bewirtungsbeleg():
                 unterschrift_base64 = unterschrift_base64.split(',')[1]
             img_data = base64.b64decode(unterschrift_base64)
             sig_buffer = io.BytesIO(img_data)
-            sig_image = RLImage(sig_buffer, width=50*mm, height=20*mm)
+            sig_image = RLImage(sig_buffer, width=37.5*mm, height=15*mm)  # 75% der Originalgröße
         except Exception as e:
             print(f"Fehler beim Laden der Unterschrift: {e}")
             sig_image = None
