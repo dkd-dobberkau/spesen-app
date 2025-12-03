@@ -48,6 +48,9 @@ services:
       - ./logs:/app/logs
       # Beleg-Ordner (inbox für neue Belege, archiv wird automatisch erstellt)
       - ./belege:/app/belege
+      # Externe Beleg-Quellen (read-only)
+      - ~/Documents/Scans:/data/scans:ro
+      - ~/Desktop/Belege:/data/belege:ro
     environment:
       - PYTHONUNBUFFERED=1
       - GUNICORN_WORKERS=4
