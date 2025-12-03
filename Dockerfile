@@ -39,7 +39,7 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # App-Code kopieren
-COPY --chown=appuser:appuser app.py cli.py ./
+COPY --chown=appuser:appuser app.py cli.py sort_belege.py ./
 COPY --chown=appuser:appuser templates/ ./templates/
 
 # Gunicorn Config kopieren

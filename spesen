@@ -1,0 +1,291 @@
+#!/bin/bash
+#
+# Spesen CLI Wrapper
+# Führt die CLI-Tools entweder im Docker-Container oder lokal aus
+#
+# Verwendung:
+#   ./spesen scan /pfad/zu/belegen --name "Max" --monat "Dez 2025"
+#   ./spesen sort /pfad/zu/belegen --dry-run
+#   ./spesen --local scan /pfad/zu/belegen   # Erzwingt lokale Ausführung
+#   ./spesen --docker scan /pfad/zu/belegen  # Erzwingt Docker-Ausführung
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONTAINER_NAME="spesen-app"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+
+# Farben für Ausgabe
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Hilfe anzeigen
+show_help() {
+    cat << EOF
+Spesen CLI - Automatische Spesenabrechnung
+
+Verwendung:
+  $0 [optionen] <befehl> [argumente...]
+
+Befehle:
+  scan <ordner>     Belege scannen und verarbeiten (cli.py)
+  sort <ordner>     Belege nach Monaten sortieren (sort_belege.py)
+  help              Diese Hilfe anzeigen
+
+Optionen:
+  --local           Erzwingt lokale Python-Ausführung
+  --docker          Erzwingt Ausführung im Docker-Container
+  --verbose, -v     Ausführliche Ausgabe
+
+Beispiele:
+  $0 scan /Users/olivier/Documents/Scans --name "Max" --monat "Dez 2025"
+  $0 sort /Users/olivier/Desktop/Belege --dry-run --use-mtime
+  $0 --docker scan /data/belege -v
+
+Umgebung:
+  SPESEN_MODE=local|docker    Standardmodus festlegen
+
+EOF
+}
+
+# Prüfen ob Docker Container läuft
+is_container_running() {
+    docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" -q 2>/dev/null | grep -q .
+}
+
+# Prüfen ob docker-compose verfügbar ist
+has_docker_compose() {
+    command -v docker &> /dev/null && docker compose version &> /dev/null
+}
+
+# Prüfen ob lokales Python-Setup funktioniert
+has_local_python() {
+    command -v python3 &> /dev/null && python3 -c "import anthropic" 2>/dev/null
+}
+
+# Pfad für Docker konvertieren (Host-Pfad zu Container-Pfad)
+convert_path_for_docker() {
+    local path="$1"
+
+    # Absolute Pfade
+    if [[ "$path" == /* ]]; then
+        # Bekannte Mappings aus docker-compose.yml
+        # ~/Documents/Scans -> /data/belege
+        if [[ "$path" == "$HOME/Documents/Scans"* ]]; then
+            echo "/data/belege${path#$HOME/Documents/Scans}"
+            return
+        fi
+        # ./data -> /app/data
+        if [[ "$path" == "$SCRIPT_DIR/data"* ]]; then
+            echo "/app/data${path#$SCRIPT_DIR/data}"
+            return
+        fi
+        # Warnung: Pfad nicht gemappt
+        echo >&2 -e "${YELLOW}⚠️  Pfad '$path' ist möglicherweise nicht im Container verfügbar${NC}"
+        echo "$path"
+    else
+        echo "$path"
+    fi
+}
+
+# Argumente für Docker anpassen
+convert_args_for_docker() {
+    local args=()
+    local skip_next=false
+
+    for arg in "$@"; do
+        if $skip_next; then
+            skip_next=false
+            args+=("$(convert_path_for_docker "$arg")")
+            continue
+        fi
+
+        # Pfad-Argumente erkennen
+        if [[ "$arg" == /* ]] && [[ -e "$arg" || -d "$arg" ]]; then
+            args+=("$(convert_path_for_docker "$arg")")
+        elif [[ "$arg" == "--output" ]] || [[ "$arg" == "-o" ]]; then
+            args+=("$arg")
+            skip_next=true
+        else
+            args+=("$arg")
+        fi
+    done
+
+    echo "${args[@]}"
+}
+
+# CLI im Docker Container ausführen
+run_in_docker() {
+    local cmd="$1"
+    shift
+    local args=("$@")
+
+    if ! is_container_running; then
+        echo -e "${YELLOW}🐳 Container nicht gestartet. Starte Container...${NC}"
+        (cd "$SCRIPT_DIR" && docker compose up -d)
+        sleep 2
+
+        if ! is_container_running; then
+            echo -e "${RED}❌ Container konnte nicht gestartet werden${NC}"
+            exit 1
+        fi
+    fi
+
+    echo -e "${BLUE}🐳 Führe im Docker-Container aus...${NC}"
+
+    # Argumente für Docker konvertieren
+    local docker_args
+    docker_args=$(convert_args_for_docker "${args[@]}")
+
+    case "$cmd" in
+        scan)
+            docker compose -f "$COMPOSE_FILE" exec -T app python cli.py $docker_args
+            ;;
+        sort)
+            docker compose -f "$COMPOSE_FILE" exec -T app python sort_belege.py $docker_args
+            ;;
+        *)
+            echo -e "${RED}❌ Unbekannter Befehl: $cmd${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+# CLI lokal ausführen
+run_locally() {
+    local cmd="$1"
+    shift
+
+    echo -e "${GREEN}🐍 Führe lokal aus...${NC}"
+
+    case "$cmd" in
+        scan)
+            python3 "$SCRIPT_DIR/cli.py" "$@"
+            ;;
+        sort)
+            python3 "$SCRIPT_DIR/sort_belege.py" "$@"
+            ;;
+        *)
+            echo -e "${RED}❌ Unbekannter Befehl: $cmd${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+# Besten Ausführungsmodus ermitteln
+detect_mode() {
+    # Umgebungsvariable prüfen
+    if [[ -n "$SPESEN_MODE" ]]; then
+        echo "$SPESEN_MODE"
+        return
+    fi
+
+    # Docker bevorzugen wenn Container läuft
+    if is_container_running; then
+        echo "docker"
+        return
+    fi
+
+    # Lokales Python wenn verfügbar
+    if has_local_python; then
+        echo "local"
+        return
+    fi
+
+    # Docker als Fallback wenn verfügbar
+    if has_docker_compose; then
+        echo "docker"
+        return
+    fi
+
+    echo "none"
+}
+
+# Hauptlogik
+main() {
+    local force_mode=""
+    local verbose=false
+    local cmd=""
+    local args=()
+
+    # Argumente parsen
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --local)
+                force_mode="local"
+                shift
+                ;;
+            --docker)
+                force_mode="docker"
+                shift
+                ;;
+            --verbose|-v)
+                verbose=true
+                args+=("$1")
+                shift
+                ;;
+            --help|-h|help)
+                show_help
+                exit 0
+                ;;
+            scan|sort)
+                cmd="$1"
+                shift
+                args+=("$@")
+                break
+                ;;
+            *)
+                if [[ -z "$cmd" ]]; then
+                    echo -e "${RED}❌ Unbekannte Option oder Befehl: $1${NC}"
+                    echo "Verwende '$0 help' für Hilfe"
+                    exit 1
+                fi
+                args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    # Befehl prüfen
+    if [[ -z "$cmd" ]]; then
+        show_help
+        exit 1
+    fi
+
+    # Modus bestimmen
+    local mode
+    if [[ -n "$force_mode" ]]; then
+        mode="$force_mode"
+    else
+        mode=$(detect_mode)
+    fi
+
+    if $verbose; then
+        echo -e "${BLUE}ℹ️  Modus: $mode${NC}"
+    fi
+
+    # Ausführen
+    case "$mode" in
+        docker)
+            run_in_docker "$cmd" "${args[@]}"
+            ;;
+        local)
+            run_locally "$cmd" "${args[@]}"
+            ;;
+        none)
+            echo -e "${RED}❌ Weder Docker noch lokales Python verfügbar${NC}"
+            echo "Bitte installiere Python 3 mit 'pip install anthropic' oder starte Docker"
+            exit 1
+            ;;
+        *)
+            echo -e "${RED}❌ Unbekannter Modus: $mode${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
