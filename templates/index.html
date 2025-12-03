@@ -555,19 +555,24 @@
             <p class="grey-text">Ergänzen Sie die bewirteten Personen für den offiziellen Bewirtungsbeleg nach § 4 Abs. 5 Nr. 2 EStG.</p>
 
             <div class="row">
-                <div class="input-field col s6">
+                <div class="input-field col s6 m3">
                     <input id="bew-datum" type="text" readonly>
                     <label for="bew-datum" class="active">Datum</label>
                 </div>
-                <div class="input-field col s6">
+                <div class="input-field col s6 m3">
                     <input id="bew-betrag" type="text" readonly>
                     <label for="bew-betrag" class="active">Betrag</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <input id="bew-restaurant" type="text">
+                    <label for="bew-restaurant" class="active">Restaurant</label>
                 </div>
             </div>
             <div class="row">
                 <div class="input-field col s12">
-                    <input id="bew-restaurant" type="text" readonly>
-                    <label for="bew-restaurant" class="active">Restaurant</label>
+                    <input id="bew-personen-original" type="text">
+                    <label for="bew-personen-original" class="active">Bewirtete Personen (aus Beleg)</label>
+                    <span class="helper-text">Dieser Wert wird auch im Haupteintrag aktualisiert</span>
                 </div>
             </div>
             <div class="row">
@@ -1206,11 +1211,21 @@
             document.getElementById('bew-datum').value = exp.datum || '';
             document.getElementById('bew-betrag').value = parseFloat(exp.betrag || 0).toFixed(2) + ' €';
 
-            // Restaurant-Name aus "personen" Feld extrahieren (Format: "Restaurant - Personen")
-            const personen = exp.personen || '';
-            const parts = personen.split(' - ');
-            const restaurant = parts[0] || personen;
+            // Restaurant und Personen aus "personen" Feld extrahieren
+            // Format kann sein: "Restaurant" oder "Restaurant - Personen"
+            const personenFeld = exp.personen || '';
+            let restaurant = personenFeld;
+            let bewirtetePersonen = '';
+
+            // Prüfen ob " - " als Trenner vorhanden ist
+            const separatorIndex = personenFeld.indexOf(' - ');
+            if (separatorIndex > 0) {
+                restaurant = personenFeld.substring(0, separatorIndex);
+                bewirtetePersonen = personenFeld.substring(separatorIndex + 3);
+            }
+
             document.getElementById('bew-restaurant').value = restaurant;
+            document.getElementById('bew-personen-original').value = bewirtetePersonen;
 
             // Teilnehmer-Liste zurücksetzen
             const liste = document.getElementById('teilnehmer-liste');
@@ -1338,12 +1353,25 @@
                 return;
             }
 
+            // Aktualisierte Werte aus dem Modal holen
+            const restaurant = document.getElementById('bew-restaurant').value.trim();
+            const bewirtetePersonen = document.getElementById('bew-personen-original').value.trim();
+
+            // Haupteintrag aktualisieren (Format: "Restaurant - Personen")
+            let neuesPersonenFeld = restaurant;
+            if (bewirtetePersonen) {
+                neuesPersonenFeld = restaurant + ' - ' + bewirtetePersonen;
+            }
+            expenses.bewirtung[currentBewirtungIndex].personen = neuesPersonenFeld;
+            renderCategory('bewirtung');
+            saveData();
+
             // Monat für Ordnername
             const monat = document.getElementById('meta-monat').value || 'Unbekannt';
 
             const data = {
                 datum: exp.datum,
-                restaurant: document.getElementById('bew-restaurant').value,
+                restaurant: restaurant,
                 ort: '',  // Kann erweitert werden
                 betrag: parseFloat(exp.betrag || 0),
                 anlass: document.getElementById('bew-anlass').value,
