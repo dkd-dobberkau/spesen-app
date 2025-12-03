@@ -926,11 +926,8 @@ def export_excel():
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                      as_attachment=True, download_name=filename)
 
-@app.route('/export/pdf', methods=['POST'])
-def export_pdf():
-    data = request.json
-    meta = data.get('meta', {})
-    expenses = data.get('expenses', {})
+def generate_pdf_buffer(meta, expenses):
+    """Generiert einen PDF-Buffer für die Spesenabrechnung."""
     
     output = io.BytesIO()
     doc = SimpleDocTemplate(output, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, 
@@ -1082,9 +1079,19 @@ def export_pdf():
 
     doc.build(elements)
     output.seek(0)
+    return output
 
+
+@app.route('/export/pdf', methods=['POST'])
+def export_pdf():
+    data = request.json
+    meta = data.get('meta', {})
+    expenses = data.get('expenses', {})
+
+    output = generate_pdf_buffer(meta, expenses)
     filename = f"Spesen_{meta.get('monat', 'Export').replace(' ', '_')}.pdf"
     return send_file(output, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
 
 @app.route('/export/bewirtungsbeleg', methods=['POST'])
 def export_bewirtungsbeleg():
@@ -1380,7 +1387,11 @@ def export_zip():
         excel_buffer.seek(0)
         zf.writestr(f"Spesen_{monat.replace(' ', '_')}.xlsx", excel_buffer.getvalue())
 
-        # 2. Belege sammeln (per file_hash)
+        # 2. PDF-Übersicht hinzufügen
+        pdf_buffer = generate_pdf_buffer(meta, expenses)
+        zf.writestr(f"Spesen_{monat.replace(' ', '_')}.pdf", pdf_buffer.getvalue())
+
+        # 3. Original-Belege sammeln (per file_hash)
         cache = {}
         if os.path.exists(CACHE_FILE):
             with open(CACHE_FILE, 'r') as f:
@@ -1402,7 +1413,7 @@ def export_zip():
                     zf.write(datei_pfad, f"Belege/{datei_name}")
                     beleg_count += 1
 
-        # 3. Bewirtungsbelege aus dem Export-Ordner hinzufügen
+        # 4. Bewirtungsbelege aus dem Export-Ordner hinzufügen
         bewirtungsbelege_dir = get_export_dir(monat, subfolder='bewirtungsbelege')
         if os.path.exists(bewirtungsbelege_dir):
             for filename in os.listdir(bewirtungsbelege_dir):
