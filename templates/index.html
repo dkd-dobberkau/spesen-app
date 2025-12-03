@@ -757,6 +757,12 @@
             renderCategory(category);
             updateTotals();
             saveData();
+
+            // Wenn aus DB geladen, auch dort speichern
+            if (currentAbrechnungId) {
+                saveToDatabase();
+            }
+
             M.toast({html: 'Eintrag hinzugefügt', classes: 'rounded'});
         }
 
@@ -765,6 +771,11 @@
             renderCategory(category);
             updateTotals();
             saveData();
+
+            // Wenn aus DB geladen, auch dort speichern
+            if (currentAbrechnungId) {
+                saveToDatabase();
+            }
         }
 
         function renderCategory(category) {
@@ -1597,6 +1608,9 @@
             const index = parseInt(document.getElementById('edit-index').value);
             const config = categoryConfig[category];
 
+            // Bestehenden Eintrag holen (um file_hash etc. zu erhalten)
+            const existingExpense = expenses[category][index] || {};
+
             const updatedExpense = {};
             config.fields.forEach(field => {
                 const input = document.getElementById(`edit-${field}`);
@@ -1607,10 +1621,20 @@
                 }
             });
 
+            // file_hash beibehalten falls vorhanden
+            if (existingExpense.file_hash) {
+                updatedExpense.file_hash = existingExpense.file_hash;
+            }
+
             expenses[category][index] = updatedExpense;
             renderCategory(category);
             updateTotals();
             saveData();
+
+            // Wenn aus DB geladen, auch dort speichern
+            if (currentAbrechnungId) {
+                saveToDatabase();
+            }
 
             const modal = M.Modal.getInstance(document.getElementById('edit-modal'));
             modal.close();
