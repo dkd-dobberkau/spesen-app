@@ -42,8 +42,11 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --chown=appuser:appuser app.py cli.py ./
 COPY --chown=appuser:appuser templates/ ./templates/
 
-# Verzeichnisse für Daten
-RUN mkdir -p /app/data /app/exports && chown -R appuser:appuser /app
+# Gunicorn Config kopieren
+COPY --chown=appuser:appuser gunicorn.conf.py ./
+
+# Verzeichnisse für Daten und Logs
+RUN mkdir -p /app/data /app/exports /app/logs && chown -R appuser:appuser /app
 
 USER appuser
 
@@ -52,9 +55,10 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=app.py
 
 # Health Check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
 
 EXPOSE 5000
 
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000"]
+# Gunicorn statt Flask Dev-Server
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]

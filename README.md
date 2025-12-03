@@ -10,6 +10,7 @@ Automatische Spesenabrechnung mit KI-gestützter Belegerkennung.
 - **Kategorien**: Fahrtkosten, Bewirtung, Telefonkosten, Uber/Taxi, etc.
 - **Export**: Excel und PDF
 - **Caching**: Bereits verarbeitete Belege werden gecacht
+- **Production-Ready**: Gunicorn WSGI-Server + Traefik Reverse Proxy
 
 ## Schnellstart
 
@@ -59,21 +60,53 @@ cp .env.example .env
 python app.py
 ```
 
-### Mit Docker
+### Mit Docker (Entwicklung)
 
 ```bash
 # .env erstellen
 cp .env.example .env
 # ANTHROPIC_API_KEY in .env eintragen
 
-# Container starten
-docker compose up -d
+# Einfaches Setup ohne Reverse Proxy
+docker compose -f docker-compose.simple.yml up -d
 
-# Web-App: http://localhost:5000
+# Web-App: http://localhost:5001
 
 # CLI im Container ausführen
 docker compose exec app python cli.py /data/belege --name "Name" --monat "Dez 2025" -v
 ```
+
+### Mit Docker (Production)
+
+```bash
+# .env erstellen mit Production-Einstellungen
+cp .env.example .env
+
+# Vollständiges Setup mit Traefik Reverse Proxy
+docker compose up -d
+
+# Web-App: http://localhost (Port 80)
+# Traefik Dashboard: http://localhost:8080
+
+# Für HTTPS: Zeilen in docker-compose.yml auskommentieren
+# und Domain + E-Mail anpassen
+```
+
+## Docker-Konfigurationen
+
+| Datei | Beschreibung |
+|-------|--------------|
+| `docker-compose.simple.yml` | Einfaches Setup ohne Reverse Proxy (Port 5001) |
+| `docker-compose.yml` | Production mit Traefik, HTTPS-ready |
+
+### Production-Features
+
+- **Gunicorn** WSGI-Server (multi-worker)
+- **Traefik** Reverse Proxy
+- **Let's Encrypt** HTTPS (konfigurierbar)
+- **Health Checks** für Container-Orchestrierung
+- **Logging** in `/app/logs/`
+- **Non-root User** im Container
 
 ## CLI-Verwendung
 
@@ -121,6 +154,10 @@ python cli.py /pfad/zu/belegen --format json
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-api03-...
+
+# Optional für Production
+GUNICORN_WORKERS=4
+LOG_LEVEL=info
 ```
 
 ### Verpflegungspauschalen
@@ -131,18 +168,32 @@ Die App enthält die deutschen Verpflegungspauschalen 2025 für verschiedene Lä
 
 ```
 spesen-app/
-├── app.py              # Flask Web-App
-├── cli.py              # CLI-Tool
+├── app.py                    # Flask Web-App
+├── cli.py                    # CLI-Tool
+├── gunicorn.conf.py          # Gunicorn WSGI-Config
 ├── templates/
-│   └── index.html      # Web-UI
-├── requirements.txt    # pip Dependencies
-├── pyproject.toml      # uv/pip Projekt-Config
-├── Dockerfile          # Docker Image
-├── docker-compose.yml  # Docker Compose
-├── .env.example        # Beispiel-Konfiguration
+│   └── index.html            # Web-UI
+├── requirements.txt          # pip Dependencies
+├── pyproject.toml            # uv/pip Projekt-Config
+├── Dockerfile                # Multi-stage Docker Image
+├── docker-compose.yml        # Production mit Traefik
+├── docker-compose.simple.yml # Entwicklung ohne Proxy
+├── .env.example              # Beispiel-Konfiguration
 ├── .gitignore
 └── README.md
 ```
+
+## API-Endpoints
+
+| Endpoint | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/` | GET | Web-UI |
+| `/health` | GET | Health Check (für Container) |
+| `/api/abrechnungen` | GET/POST | Abrechnungen verwalten |
+| `/api/einstellungen` | GET/POST | Einstellungen |
+| `/api/parse-beleg` | POST | Beleg mit KI analysieren |
+| `/export/excel` | POST | Excel-Export |
+| `/export/pdf` | POST | PDF-Export |
 
 ## Datenbank
 
@@ -157,6 +208,8 @@ SQLite-Datenbank (`spesen.db`) mit folgenden Tabellen:
 - IBAN/BIC werden mit Fernet (AES) verschlüsselt gespeichert
 - `secret.key` wird automatisch generiert und sollte nicht committed werden
 - `.env` enthält API-Keys und ist in `.gitignore`
+- Non-root User im Docker-Container
+- Gunicorn mit Request-Limits
 
 ## Entwicklung
 

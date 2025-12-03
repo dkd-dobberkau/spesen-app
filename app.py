@@ -146,6 +146,25 @@ CATEGORIES = {
 def index():
     return render_template('index.html', categories=CATEGORIES, verpflegungspauschalen=VERPFLEGUNGSPAUSCHALEN)
 
+@app.route('/health')
+def health():
+    """Health check endpoint for container orchestration."""
+    try:
+        # Test database connection
+        with get_db() as conn:
+            conn.execute('SELECT 1')
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 503
+
 @app.route('/api/verpflegungspauschalen')
 def get_verpflegungspauschalen():
     return jsonify(VERPFLEGUNGSPAUSCHALEN)

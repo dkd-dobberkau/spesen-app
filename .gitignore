@@ -32,3 +32,10 @@ Thumbs.db
 # Exports
 *.xlsx
 *.pdf
+exports/
+
+# Logs
+logs/
+
+# Traefik
+traefik/
