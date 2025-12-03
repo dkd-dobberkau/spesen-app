@@ -7,7 +7,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from cryptography.fernet import Fernet
@@ -16,6 +16,7 @@ from PIL import Image
 import anthropic
 import pytesseract
 import base64
+import hashlib
 import io
 import json
 import os
@@ -33,6 +34,41 @@ except ImportError:
     PDF_SUPPORT = False
 
 app = Flask(__name__)
+
+# Data directory for storing files
+DATA_DIR = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(__file__), 'data'))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Cache file for parsed receipts (same format as CLI)
+CACHE_FILE = os.path.join(DATA_DIR, '.beleg_cache.json')
+
+
+def get_content_hash(content):
+    """Berechnet MD5-Hash des Dateiinhalts für Cache-Key"""
+    hasher = hashlib.md5()
+    hasher.update(content)
+    return hasher.hexdigest()
+
+
+def load_cache():
+    """Lädt den Cache aus der JSON-Datei"""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def save_cache(cache):
+    """Speichert den Cache in die JSON-Datei"""
+    try:
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except IOError as e:
+        print(f"Cache konnte nicht gespeichert werden: {e}")
+
 
 # Encryption key - in production, store this securely (e.g., environment variable)
 KEY_FILE = 'secret.key'
@@ -98,7 +134,16 @@ def init_db():
                 iban_encrypted TEXT,
                 bic_encrypted TEXT,
                 bank TEXT,
+                unterschrift_base64 TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS personen (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                firma TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         conn.commit()
@@ -322,6 +367,25 @@ def parse_beleg():
 
     try:
         filename = file.filename.lower()
+        original_filename = file.filename
+
+        # Dateiinhalt lesen für Hash-Berechnung
+        file_content = file.read()
+        file.seek(0)  # Zurücksetzen für weitere Verarbeitung
+
+        # Cache prüfen
+        content_hash = get_content_hash(file_content)
+        cache = load_cache()
+
+        if content_hash in cache:
+            # Aus Cache laden
+            cached_data = cache[content_hash].copy()
+            cached_data['_cached'] = True
+            return jsonify({
+                'success': True,
+                'data': cached_data
+            })
+
         images = []
         first_image_base64 = None
 
@@ -329,11 +393,10 @@ def parse_beleg():
             if not PDF_SUPPORT:
                 return jsonify({'error': 'PDF-Support nicht verfügbar. Bitte poppler installieren.'}), 400
             # PDF zu Bildern konvertieren
-            pdf_bytes = file.read()
-            images = convert_from_bytes(pdf_bytes, dpi=300)
+            images = convert_from_bytes(file_content, dpi=300)
         elif filename.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
             # Bild direkt laden
-            images = [Image.open(file)]
+            images = [Image.open(io.BytesIO(file_content))]
         else:
             return jsonify({'error': 'Nicht unterstütztes Dateiformat. Erlaubt: PDF, PNG, JPG, TIFF'}), 400
 
@@ -370,6 +433,10 @@ def parse_beleg():
         # Daten mit Claude AI extrahieren (mit Bild für bessere Erkennung)
         extracted = extract_receipt_data_with_ai(full_text, first_image_base64)
 
+        # In Cache speichern
+        cache[content_hash] = extracted
+        save_cache(cache)
+
         return jsonify({
             'success': True,
             'data': extracted
@@ -404,18 +471,77 @@ def save_einstellungen():
 
     with get_db() as conn:
         conn.execute('''
-            INSERT INTO einstellungen (id, name, iban_encrypted, bic_encrypted, bank)
-            VALUES (1, ?, ?, ?, ?)
+            INSERT INTO einstellungen (id, name, iban_encrypted, bic_encrypted, bank, unterschrift_base64)
+            VALUES (1, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 iban_encrypted = excluded.iban_encrypted,
                 bic_encrypted = excluded.bic_encrypted,
                 bank = excluded.bank,
+                unterschrift_base64 = COALESCE(excluded.unterschrift_base64, unterschrift_base64),
                 updated_at = CURRENT_TIMESTAMP
-        ''', (data.get('name', ''), iban_encrypted, bic_encrypted, data.get('bank', '')))
+        ''', (data.get('name', ''), iban_encrypted, bic_encrypted, data.get('bank', ''), data.get('unterschrift_base64')))
         conn.commit()
 
     return jsonify({'success': True})
+
+@app.route('/api/unterschrift', methods=['POST'])
+def save_unterschrift():
+    """Speichert die Unterschrift als Base64-PNG."""
+    data = request.json
+    unterschrift = data.get('unterschrift_base64', '')
+
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO einstellungen (id, unterschrift_base64)
+            VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                unterschrift_base64 = excluded.unterschrift_base64,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (unterschrift,))
+        conn.commit()
+
+    return jsonify({'success': True})
+
+@app.route('/api/unterschrift', methods=['GET'])
+def get_unterschrift():
+    """Gibt die Unterschrift als Base64 zurück."""
+    with get_db() as conn:
+        row = conn.execute('SELECT unterschrift_base64 FROM einstellungen WHERE id = 1').fetchone()
+        if row and row['unterschrift_base64']:
+            return jsonify({'unterschrift_base64': row['unterschrift_base64']})
+        return jsonify({'unterschrift_base64': None})
+
+# API: Personen verwalten
+@app.route('/api/personen', methods=['GET'])
+def list_personen():
+    """Liste aller gespeicherten Personen."""
+    with get_db() as conn:
+        rows = conn.execute('SELECT id, name, firma FROM personen ORDER BY name').fetchall()
+        return jsonify([dict(row) for row in rows])
+
+@app.route('/api/personen', methods=['POST'])
+def add_person():
+    """Fügt eine neue Person hinzu."""
+    data = request.json
+    name = data.get('name', '').strip()
+    firma = data.get('firma', '').strip()
+
+    if not name:
+        return jsonify({'error': 'Name ist erforderlich'}), 400
+
+    with get_db() as conn:
+        cursor = conn.execute('INSERT INTO personen (name, firma) VALUES (?, ?)', (name, firma))
+        conn.commit()
+        return jsonify({'success': True, 'id': cursor.lastrowid})
+
+@app.route('/api/personen/<int:person_id>', methods=['DELETE'])
+def delete_person(person_id):
+    """Löscht eine Person."""
+    with get_db() as conn:
+        conn.execute('DELETE FROM personen WHERE id = ?', (person_id,))
+        conn.commit()
+        return jsonify({'success': True})
 
 # API: Liste aller Abrechnungen
 @app.route('/api/abrechnungen', methods=['GET'])
@@ -796,8 +922,215 @@ def export_pdf():
 
     doc.build(elements)
     output.seek(0)
-    
+
     filename = f"Spesen_{meta.get('monat', 'Export').replace(' ', '_')}.pdf"
+    return send_file(output, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
+@app.route('/export/bewirtungsbeleg', methods=['POST'])
+def export_bewirtungsbeleg():
+    """Generiert einen offiziellen Bewirtungsbeleg nach §4 Abs. 5 Nr. 2 EStG."""
+    data = request.json
+
+    # Daten aus dem Request
+    datum = data.get('datum', '')
+    restaurant = data.get('restaurant', '')
+    ort = data.get('ort', '')
+    betrag = float(data.get('betrag', 0) or 0)
+    anlass = data.get('anlass', 'Geschäftliche Besprechung')
+    bewirtende_person = data.get('bewirtende_person', '')
+    teilnehmer = data.get('teilnehmer', [])  # Liste von {name, firma}
+    unterschrift_base64 = data.get('unterschrift_base64', None)
+    monat = data.get('monat', 'Unbekannt')
+
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm,
+                           topMargin=20*mm, bottomMargin=20*mm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=18,
+                                  textColor=colors.HexColor('#333333'), spaceAfter=15, alignment=1)
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10,
+                                     textColor=colors.grey, spaceAfter=20, alignment=1)
+    label_style = ParagraphStyle('Label', parent=styles['Normal'], fontSize=10,
+                                  textColor=colors.grey)
+    value_style = ParagraphStyle('Value', parent=styles['Normal'], fontSize=12,
+                                  spaceAfter=15)
+
+    elements = []
+
+    # Titel
+    elements.append(Paragraph("Bewirtungsbeleg", title_style))
+    elements.append(Paragraph("gemäß § 4 Abs. 5 Nr. 2 EStG", subtitle_style))
+    elements.append(Spacer(1, 10*mm))
+
+    # Hauptdaten als Tabelle
+    main_data = [
+        ['Tag der Bewirtung:', datum],
+        ['Ort (Name und Anschrift):', f"{restaurant}, {ort}" if ort else restaurant],
+    ]
+
+    main_table = Table(main_data, colWidths=[60*mm, 110*mm])
+    main_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('LINEBELOW', (1, 0), (1, -1), 0.5, colors.lightgrey),
+    ]))
+    elements.append(main_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Teilnehmer-Tabelle
+    elements.append(Paragraph("Bewirtete Personen:", label_style))
+    elements.append(Spacer(1, 3*mm))
+
+    if teilnehmer:
+        teilnehmer_data = [['Name', 'Firma/Funktion']]
+        for t in teilnehmer:
+            if isinstance(t, dict):
+                teilnehmer_data.append([t.get('name', ''), t.get('firma', '')])
+            else:
+                teilnehmer_data.append([str(t), ''])
+    else:
+        # Leere Zeilen zum Ausfüllen
+        teilnehmer_data = [['Name', 'Firma/Funktion']]
+        for _ in range(4):
+            teilnehmer_data.append(['', ''])
+
+    teilnehmer_table = Table(teilnehmer_data, colWidths=[85*mm, 85*mm])
+    teilnehmer_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('MINROWHEIGHT', (0, 1), (-1, -1), 10*mm),
+    ]))
+    elements.append(teilnehmer_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Anlass
+    anlass_data = [
+        ['Anlass der Bewirtung:', anlass if anlass else ''],
+    ]
+    anlass_table = Table(anlass_data, colWidths=[60*mm, 110*mm])
+    anlass_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('LINEBELOW', (1, 0), (1, -1), 0.5, colors.lightgrey),
+        ('MINROWHEIGHT', (0, 0), (-1, -1), 12*mm),
+    ]))
+    elements.append(anlass_table)
+    elements.append(Spacer(1, 8*mm))
+
+    # Betrag
+    betrag_data = [
+        ['Höhe der Aufwendungen:', f"{betrag:.2f} €" if betrag else '______________ €'],
+    ]
+    betrag_table = Table(betrag_data, colWidths=[60*mm, 110*mm])
+    betrag_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('FONTSIZE', (1, 0), (1, -1), 14),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(betrag_table)
+    elements.append(Spacer(1, 15*mm))
+
+    # Unterschrift
+    # Prüfen ob eine Unterschrift vorhanden ist
+    sig_image = None
+    if unterschrift_base64:
+        try:
+            # Base64-Daten dekodieren (entferne data:image/png;base64, Prefix falls vorhanden)
+            if ',' in unterschrift_base64:
+                unterschrift_base64 = unterschrift_base64.split(',')[1]
+            img_data = base64.b64decode(unterschrift_base64)
+            sig_buffer = io.BytesIO(img_data)
+            sig_image = RLImage(sig_buffer, width=50*mm, height=20*mm)
+        except Exception as e:
+            print(f"Fehler beim Laden der Unterschrift: {e}")
+            sig_image = None
+
+    if sig_image:
+        # Mit Unterschriftsbild
+        sig_data = [
+            [sig_image, ''],
+            ['Datum, Unterschrift des Bewirtenden', bewirtende_person],
+        ]
+    else:
+        # Ohne Unterschrift - leeres Feld zum Unterschreiben
+        sig_data = [
+            ['', ''],
+            ['Datum, Unterschrift des Bewirtenden', bewirtende_person],
+        ]
+
+    sig_table = Table(sig_data, colWidths=[85*mm, 85*mm])
+    sig_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 1), (0, 1), colors.grey),
+        ('FONTSIZE', (1, 1), (1, 1), 11),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+        ('LINEABOVE', (0, 1), (0, 1), 0.5, colors.black),
+        ('LINEABOVE', (1, 1), (1, 1), 0.5, colors.black),
+        ('TOPPADDING', (0, 1), (-1, 1), 5),
+        ('MINROWHEIGHT', (0, 0), (-1, 0), 15*mm),
+    ]))
+    elements.append(sig_table)
+
+    # Hinweis
+    elements.append(Spacer(1, 15*mm))
+    hinweis_style = ParagraphStyle('Hinweis', parent=styles['Normal'], fontSize=8,
+                                    textColor=colors.grey, alignment=1)
+    elements.append(Paragraph(
+        "Hinweis: Bitte Originalbeleg anheften. Bei Bewirtungen in Gaststätten ist dieser Beleg "
+        "zusammen mit der Rechnung der Gaststätte aufzubewahren.",
+        hinweis_style
+    ))
+
+    doc.build(elements)
+    output.seek(0)
+
+    # Optimiertes Namensschema: YYYY-MM-DD_Restaurant_Bewirtungsbeleg.pdf
+    # Datum von DD.MM.YYYY zu YYYY-MM-DD konvertieren
+    try:
+        datum_parts = datum.split('.')
+        if len(datum_parts) == 3:
+            iso_datum = f"{datum_parts[2]}-{datum_parts[1]}-{datum_parts[0]}"
+        else:
+            iso_datum = datum.replace('.', '-')
+    except Exception:
+        iso_datum = datum.replace('.', '-')
+
+    # Restaurant-Name säubern
+    safe_restaurant = re.sub(r'[^\w\s-]', '', restaurant).strip()
+    safe_restaurant = re.sub(r'\s+', '_', safe_restaurant)[:25]
+
+    filename = f"{iso_datum}_{safe_restaurant}_Bewirtungsbeleg.pdf"
+
+    # Ordner für Kostenerstattung erstellen (im data-Verzeichnis)
+    safe_monat = re.sub(r'[^\w\s-]', '', monat).strip()
+    safe_monat = re.sub(r'\s+', '_', safe_monat)
+    bewirtungsbelege_dir = os.path.join(DATA_DIR, 'bewirtungsbelege', safe_monat)
+    os.makedirs(bewirtungsbelege_dir, exist_ok=True)
+
+    # PDF in Ordner speichern
+    filepath = os.path.join(bewirtungsbelege_dir, filename)
+    with open(filepath, 'wb') as f:
+        f.write(output.getvalue())
+
+    output.seek(0)
     return send_file(output, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':

@@ -477,10 +477,12 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settings-modal" class="modal">
+    <div id="settings-modal" class="modal modal-fixed-footer" style="max-height: 85%;">
         <div class="modal-content">
             <h4><i class="material-icons left">settings</i>Einstellungen</h4>
-            <p class="grey-text">Diese Daten werden lokal gespeichert und für alle Abrechnungen verwendet.</p>
+            <p class="grey-text">Diese Daten werden lokal in einer verschlüsselten Datenbank gespeichert und für alle Abrechnungen verwendet.</p>
+
+            <h5>Persönliche Daten</h5>
             <div class="row">
                 <div class="input-field col s12">
                     <input id="settings-name" type="text">
@@ -499,6 +501,44 @@
                     <label for="settings-bank" class="active">Bank (optional)</label>
                 </div>
             </div>
+
+            <h5>Unterschrift</h5>
+            <p class="grey-text" style="font-size: 0.9em;">PNG-Bild für Bewirtungsbelege (transparent empfohlen)</p>
+            <div class="row">
+                <div class="col s12">
+                    <div id="unterschrift-preview" style="border: 1px dashed #ccc; padding: 10px; min-height: 80px; text-align: center; margin-bottom: 10px; background: #f9f9f9;">
+                        <span class="grey-text">Keine Unterschrift hochgeladen</span>
+                    </div>
+                    <div class="file-field input-field">
+                        <div class="btn btn-small">
+                            <span>PNG hochladen</span>
+                            <input type="file" id="unterschrift-upload" accept="image/png">
+                        </div>
+                        <div class="file-path-wrapper">
+                            <input class="file-path validate" type="text" placeholder="Unterschrift auswählen...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <h5>Gespeicherte Personen</h5>
+            <p class="grey-text" style="font-size: 0.9em;">Häufig bewirtete Personen für schnelle Auswahl</p>
+            <div id="personen-liste" style="margin-bottom: 15px;">
+                <p class="grey-text center">Lade Personen...</p>
+            </div>
+            <div class="row">
+                <div class="input-field col s5">
+                    <input id="neue-person-name" type="text" placeholder="Name">
+                </div>
+                <div class="input-field col s5">
+                    <input id="neue-person-firma" type="text" placeholder="Firma/Funktion">
+                </div>
+                <div class="col s2" style="padding-top: 15px;">
+                    <a href="#!" class="btn-small waves-effect waves-light" onclick="addNewPerson()">
+                        <i class="material-icons">add</i>
+                    </a>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <a href="#!" class="modal-close btn-flat">Abbrechen</a>
@@ -508,8 +548,78 @@
         </div>
     </div>
 
+    <!-- Bewirtungsbeleg Modal -->
+    <div id="bewirtungsbeleg-modal" class="modal modal-fixed-footer">
+        <div class="modal-content">
+            <h4><i class="material-icons left">receipt_long</i>Bewirtungsbeleg erstellen</h4>
+            <p class="grey-text">Ergänzen Sie die bewirteten Personen für den offiziellen Bewirtungsbeleg nach § 4 Abs. 5 Nr. 2 EStG.</p>
+
+            <div class="row">
+                <div class="input-field col s6">
+                    <input id="bew-datum" type="text" readonly>
+                    <label for="bew-datum" class="active">Datum</label>
+                </div>
+                <div class="input-field col s6">
+                    <input id="bew-betrag" type="text" readonly>
+                    <label for="bew-betrag" class="active">Betrag</label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="input-field col s12">
+                    <input id="bew-restaurant" type="text" readonly>
+                    <label for="bew-restaurant" class="active">Restaurant</label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="input-field col s12">
+                    <input id="bew-anlass" type="text" value="Geschäftliche Besprechung">
+                    <label for="bew-anlass" class="active">Anlass der Bewirtung</label>
+                </div>
+            </div>
+
+            <h5>Bewirtete Personen</h5>
+            <p class="grey-text" style="font-size: 0.9em;">Name und Firma/Funktion der Teilnehmer</p>
+
+            <!-- Schnellauswahl gespeicherter Personen -->
+            <div id="gespeicherte-personen-chips" style="margin-bottom: 15px;">
+                <!-- Wird dynamisch befüllt -->
+            </div>
+
+            <div id="teilnehmer-liste">
+                <div class="row teilnehmer-row">
+                    <div class="input-field col s6">
+                        <input type="text" class="teilnehmer-name" placeholder="Name">
+                    </div>
+                    <div class="input-field col s5">
+                        <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion">
+                    </div>
+                    <div class="col s1 center-align" style="padding-top: 20px;">
+                        <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col s12">
+                    <a href="#!" class="btn-flat waves-effect" onclick="addTeilnehmer()">
+                        <i class="material-icons left">add</i>Manuell hinzufügen
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Abbrechen</a>
+            <a href="#!" class="btn waves-effect waves-light green" onclick="downloadBewirtungsbeleg()">
+                <i class="material-icons left">picture_as_pdf</i>PDF erstellen
+            </a>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
+        // Bewirtungsbeleg-Index für aktuellen Eintrag
+        let currentBewirtungIndex = null;
+
         // Data storage
         const expenses = {
             fahrtkosten_kfz: [],
@@ -618,16 +728,23 @@
                 } else if (category === 'bewirtung') {
                     betrag = parseFloat(exp.betrag || 0);
                     details = `${exp.datum} | ${exp.personen}`;
+                    // Bewirtungsbeleg-Button hinzufügen
+                    exp._showBewirtungsbeleg = true;
                 } else {
                     betrag = parseFloat(exp.betrag || 0);
                     details = `${exp.datum || exp.monat} | ${exp.beschreibung}`;
                 }
                 
+                const bewirtungBtn = exp._showBewirtungsbeleg
+                    ? `<i class="material-icons delete-btn" onclick="generateBewirtungsbeleg(${index})" style="margin-right: 10px;" title="Bewirtungsbeleg erstellen">receipt_long</i>`
+                    : '';
+
                 html += `
                     <div class="expense-item row valign-wrapper" style="margin-bottom: 5px;">
-                        <div class="col s7 m8">${details}</div>
+                        <div class="col s6 m7">${details}</div>
                         <div class="col s3 m2 right-align"><strong>${betrag.toFixed(2)} €</strong></div>
-                        <div class="col s2 m2 right-align">
+                        <div class="col s3 m3 right-align">
+                            ${bewirtungBtn}
                             <i class="material-icons delete-btn" onclick="editExpense('${category}', ${index})" style="margin-right: 10px;" title="Bearbeiten">edit</i>
                             <i class="material-icons delete-btn" onclick="deleteExpense('${category}', ${index})" title="Löschen">delete</i>
                         </div>
@@ -890,8 +1007,138 @@
             document.getElementById('settings-bank').value = userSettings.bank || '';
             M.updateTextFields();
 
+            // Unterschrift laden
+            loadUnterschrift();
+
+            // Personen laden
+            loadPersonen();
+
             const modal = M.Modal.getInstance(document.getElementById('settings-modal'));
             modal.open();
+        }
+
+        // Unterschrift-Vorschau
+        let unterschriftBase64 = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadInput = document.getElementById('unterschrift-upload');
+            if (uploadInput) {
+                uploadInput.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'image/png') {
+                        const reader = new FileReader();
+                        reader.onload = function(event) {
+                            unterschriftBase64 = event.target.result;
+                            updateUnterschriftPreview(unterschriftBase64);
+
+                            // Direkt speichern
+                            fetch('/api/unterschrift', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ unterschrift_base64: unterschriftBase64 })
+                            })
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.success) {
+                                    M.toast({html: 'Unterschrift gespeichert', classes: 'rounded green'});
+                                }
+                            });
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        M.toast({html: 'Bitte nur PNG-Dateien', classes: 'rounded orange'});
+                    }
+                });
+            }
+        });
+
+        function loadUnterschrift() {
+            fetch('/api/unterschrift')
+            .then(res => res.json())
+            .then(data => {
+                if (data.unterschrift_base64) {
+                    unterschriftBase64 = data.unterschrift_base64;
+                    updateUnterschriftPreview(unterschriftBase64);
+                }
+            });
+        }
+
+        function updateUnterschriftPreview(base64) {
+            const preview = document.getElementById('unterschrift-preview');
+            if (base64) {
+                preview.innerHTML = `<img src="${base64}" style="max-height: 60px; max-width: 200px;">`;
+            } else {
+                preview.innerHTML = '<span class="grey-text">Keine Unterschrift hochgeladen</span>';
+            }
+        }
+
+        // Personen-Verwaltung
+        let gespeichertePersonen = [];
+
+        function loadPersonen() {
+            fetch('/api/personen')
+            .then(res => res.json())
+            .then(data => {
+                gespeichertePersonen = data;
+                renderPersonenListe();
+            });
+        }
+
+        function renderPersonenListe() {
+            const liste = document.getElementById('personen-liste');
+            if (gespeichertePersonen.length === 0) {
+                liste.innerHTML = '<p class="grey-text center" style="font-size: 0.9em;">Noch keine Personen gespeichert</p>';
+                return;
+            }
+
+            let html = '<div class="collection">';
+            gespeichertePersonen.forEach(p => {
+                html += `
+                    <div class="collection-item">
+                        <span><strong>${p.name}</strong>${p.firma ? ' - ' + p.firma : ''}</span>
+                        <a href="#!" class="secondary-content" onclick="deletePerson(${p.id})">
+                            <i class="material-icons grey-text">delete</i>
+                        </a>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            liste.innerHTML = html;
+        }
+
+        function addNewPerson() {
+            const name = document.getElementById('neue-person-name').value.trim();
+            const firma = document.getElementById('neue-person-firma').value.trim();
+
+            if (!name) {
+                M.toast({html: 'Name ist erforderlich', classes: 'rounded orange'});
+                return;
+            }
+
+            fetch('/api/personen', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, firma })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('neue-person-name').value = '';
+                    document.getElementById('neue-person-firma').value = '';
+                    loadPersonen();
+                    M.toast({html: 'Person hinzugefügt', classes: 'rounded green'});
+                }
+            });
+        }
+
+        function deletePerson(id) {
+            fetch(`/api/personen/${id}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    loadPersonen();
+                }
+            });
         }
 
         function saveSettings() {
@@ -948,6 +1195,196 @@
             } else {
                 displayEl.innerHTML = '<em>Name in Einstellungen hinterlegen</em>';
             }
+        }
+
+        // Bewirtungsbeleg-Funktionen
+        function generateBewirtungsbeleg(index) {
+            currentBewirtungIndex = index;
+            const exp = expenses.bewirtung[index];
+
+            // Felder befüllen
+            document.getElementById('bew-datum').value = exp.datum || '';
+            document.getElementById('bew-betrag').value = parseFloat(exp.betrag || 0).toFixed(2) + ' €';
+
+            // Restaurant-Name aus "personen" Feld extrahieren (Format: "Restaurant - Personen")
+            const personen = exp.personen || '';
+            const parts = personen.split(' - ');
+            const restaurant = parts[0] || personen;
+            document.getElementById('bew-restaurant').value = restaurant;
+
+            // Teilnehmer-Liste zurücksetzen
+            const liste = document.getElementById('teilnehmer-liste');
+            liste.innerHTML = `
+                <div class="row teilnehmer-row">
+                    <div class="input-field col s6">
+                        <input type="text" class="teilnehmer-name" placeholder="Name">
+                    </div>
+                    <div class="input-field col s5">
+                        <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion">
+                    </div>
+                    <div class="col s1 center-align" style="padding-top: 20px;">
+                        <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
+                    </div>
+                </div>
+            `;
+
+            // Gespeicherte Personen als Chips anzeigen
+            renderPersonenChips();
+
+            // Modal öffnen
+            M.updateTextFields();
+            const modal = M.Modal.getInstance(document.getElementById('bewirtungsbeleg-modal'));
+            modal.open();
+        }
+
+        function renderPersonenChips() {
+            const container = document.getElementById('gespeicherte-personen-chips');
+            if (gespeichertePersonen.length === 0) {
+                container.innerHTML = '<span class="grey-text" style="font-size: 0.85em;">Keine gespeicherten Personen. Personen können in den Einstellungen hinzugefügt werden.</span>';
+                return;
+            }
+
+            let html = '<span class="grey-text" style="font-size: 0.85em; margin-right: 10px;">Schnellauswahl:</span>';
+            gespeichertePersonen.forEach(p => {
+                html += `<div class="chip" style="cursor: pointer;" onclick="addPersonFromChip('${p.name.replace(/'/g, "\\'")}', '${(p.firma || '').replace(/'/g, "\\'")}')">
+                    ${p.name}${p.firma ? ' <span class="grey-text">(' + p.firma + ')</span>' : ''}
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function addPersonFromChip(name, firma) {
+            // Prüfen ob Person bereits in der Liste ist
+            const existingNames = Array.from(document.querySelectorAll('.teilnehmer-name')).map(el => el.value.trim().toLowerCase());
+            if (existingNames.includes(name.toLowerCase())) {
+                M.toast({html: 'Person bereits hinzugefügt', classes: 'rounded orange'});
+                return;
+            }
+
+            // Leere Zeile finden oder neue erstellen
+            let emptyRow = null;
+            document.querySelectorAll('.teilnehmer-row').forEach(row => {
+                const nameInput = row.querySelector('.teilnehmer-name');
+                if (nameInput && !nameInput.value.trim()) {
+                    emptyRow = row;
+                }
+            });
+
+            if (emptyRow) {
+                emptyRow.querySelector('.teilnehmer-name').value = name;
+                emptyRow.querySelector('.teilnehmer-firma').value = firma;
+            } else {
+                // Neue Zeile hinzufügen
+                const liste = document.getElementById('teilnehmer-liste');
+                const row = document.createElement('div');
+                row.className = 'row teilnehmer-row';
+                row.innerHTML = `
+                    <div class="input-field col s6">
+                        <input type="text" class="teilnehmer-name" placeholder="Name" value="${name}">
+                    </div>
+                    <div class="input-field col s5">
+                        <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion" value="${firma}">
+                    </div>
+                    <div class="col s1 center-align" style="padding-top: 20px;">
+                        <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
+                    </div>
+                `;
+                liste.appendChild(row);
+            }
+
+            M.toast({html: name + ' hinzugefügt', classes: 'rounded green'});
+        }
+
+        function addTeilnehmer() {
+            const liste = document.getElementById('teilnehmer-liste');
+            const row = document.createElement('div');
+            row.className = 'row teilnehmer-row';
+            row.innerHTML = `
+                <div class="input-field col s6">
+                    <input type="text" class="teilnehmer-name" placeholder="Name">
+                </div>
+                <div class="input-field col s5">
+                    <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion">
+                </div>
+                <div class="col s1 center-align" style="padding-top: 20px;">
+                    <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
+                </div>
+            `;
+            liste.appendChild(row);
+        }
+
+        function removeTeilnehmer(element) {
+            const rows = document.querySelectorAll('.teilnehmer-row');
+            if (rows.length > 1) {
+                element.closest('.teilnehmer-row').remove();
+            }
+        }
+
+        function downloadBewirtungsbeleg() {
+            const exp = expenses.bewirtung[currentBewirtungIndex];
+
+            // Teilnehmer sammeln
+            const teilnehmer = [];
+            document.querySelectorAll('.teilnehmer-row').forEach(row => {
+                const name = row.querySelector('.teilnehmer-name').value.trim();
+                const firma = row.querySelector('.teilnehmer-firma').value.trim();
+                if (name) {
+                    teilnehmer.push({ name, firma });
+                }
+            });
+
+            if (teilnehmer.length === 0) {
+                M.toast({html: 'Bitte mindestens eine Person eintragen', classes: 'rounded orange'});
+                return;
+            }
+
+            // Monat für Ordnername
+            const monat = document.getElementById('meta-monat').value || 'Unbekannt';
+
+            const data = {
+                datum: exp.datum,
+                restaurant: document.getElementById('bew-restaurant').value,
+                ort: '',  // Kann erweitert werden
+                betrag: parseFloat(exp.betrag || 0),
+                anlass: document.getElementById('bew-anlass').value,
+                bewirtende_person: userSettings.name || '',
+                teilnehmer: teilnehmer,
+                unterschrift_base64: unterschriftBase64,  // Unterschrift für PDF
+                monat: monat  // Für Ordnerstruktur
+            };
+
+            fetch('/export/bewirtungsbeleg', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                // Dateiname aus Content-Disposition Header lesen
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'Bewirtungsbeleg.pdf';
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
+                    if (match) filename = match[1];
+                }
+                return response.blob().then(blob => ({ blob, filename }));
+            })
+            .then(({ blob, filename }) => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+
+                const modal = M.Modal.getInstance(document.getElementById('bewirtungsbeleg-modal'));
+                modal.close();
+                M.toast({html: 'Bewirtungsbeleg erstellt und gespeichert', classes: 'rounded green'});
+            })
+            .catch(err => {
+                M.toast({html: 'Fehler: ' + err.message, classes: 'rounded red'});
+            });
         }
 
         // Verpflegungspauschalen 2025
@@ -1195,7 +1632,13 @@
                 }
 
                 M.updateTextFields();
-                M.toast({html: 'Beleg analysiert', classes: 'rounded green'});
+
+                // Cache-Indikator anzeigen
+                if (extracted._cached) {
+                    M.toast({html: '📦 Beleg aus Cache geladen', classes: 'rounded blue'});
+                } else {
+                    M.toast({html: 'Beleg analysiert', classes: 'rounded green'});
+                }
             })
             .catch(err => {
                 document.getElementById('scan-progress').style.display = 'none';

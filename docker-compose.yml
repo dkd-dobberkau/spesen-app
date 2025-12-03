@@ -52,6 +52,7 @@ services:
       - PYTHONUNBUFFERED=1
       - GUNICORN_WORKERS=4
       - LOG_LEVEL=info
+      - DATA_DIR=/app/data
     env_file:
       - .env
     networks:
