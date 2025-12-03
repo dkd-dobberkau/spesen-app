@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spesenabrechnung - Olivier Dobberkau</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
+    <style>
+        :root { --primary-color: #333333; }
+        .nav-wrapper, .btn, .btn-floating { background-color: var(--primary-color) !important; }
+        .btn.green { background-color: #4CAF50 !important; }
+        .btn.blue { background-color: #2196F3 !important; }
+        .tabs .tab a { color: var(--primary-color); }
+        .tabs .tab a.active { border-bottom: 2px solid var(--primary-color); }
+        .tabs .indicator { background-color: var(--primary-color); }
+        body { background-color: #f5f5f5; }
+        .card { border-radius: 8px; }
+        .card-title { color: var(--primary-color) !important; font-weight: 500; }
+        .expense-item {
+            background: #fafafa;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 3px solid var(--primary-color);
+        }
+        .expense-item:hover { background: #f0f0f0; }
+        .delete-btn { cursor: pointer; color: #999; }
+        .delete-btn:hover { color: var(--primary-color); }
+        .sum-display {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            text-align: right;
+        }
+        .category-sum {
+            background: #f5f5f5;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .input-field input:focus, .input-field textarea:focus { border-bottom: 1px solid var(--primary-color) !important; box-shadow: 0 1px 0 0 var(--primary-color) !important; }
+        .input-field input:focus + label, .input-field textarea:focus + label { color: var(--primary-color) !important; }
+        [type="checkbox"]:checked + span:not(.lever)::before { border-right-color: var(--primary-color); border-bottom-color: var(--primary-color); }
+        .export-section { position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
+        .collapsible-header {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .collapsible-header i.material-icons:first-child {
+            color: var(--primary-color);
+            margin-right: 15px;
+        }
+        .collapsible-header .header-text {
+            flex: 1;
+            font-size: 1rem;
+            color: #333;
+        }
+        .collapsible-header .badge-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .collapsible-header .badge {
+            background-color: var(--primary-color) !important;
+            color: white !important;
+            min-width: 24px;
+            text-align: center;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 0.85rem;
+        }
+        .collapsible-header .sum-badge {
+            background-color: #e8f5e9 !important;
+            color: #2e7d32 !important;
+            font-weight: 600;
+            min-width: 80px;
+            text-align: right;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 0.95rem;
+        }
+        .collapsible-header .sum-badge.has-value {
+            background-color: #c8e6c9 !important;
+        }
+        .collapsible li {
+            border: none;
+            margin-bottom: 2px;
+        }
+        .collapsible li.active .collapsible-header {
+            background: #f5f5f5;
+            border-left: 3px solid var(--primary-color);
+        }
+        .collapsible-body {
+            padding: 15px 20px;
+            background: #fafafa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .total-card { background: linear-gradient(135deg, #333333, #555555); color: white; }
+        .total-card .card-title { color: white !important; }
+        @media only screen and (max-width: 600px) {
+            .export-section { bottom: 10px; right: 10px; left: 10px; }
+            .export-section .btn { width: 100%; margin: 5px 0; }
+            .collapsible-header .sum-badge { min-width: 60px; font-size: 0.85rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-wrapper">
+            <a href="#" class="brand-logo center">Spesenabrechnung</a>
+            <ul class="right">
+                <li><a href="#!" onclick="openSettings()" title="Einstellungen"><i class="material-icons">settings</i></a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container" style="margin-top: 20px; margin-bottom: 100px;">
+        <!-- Meta Information -->
+        <div class="card">
+            <div class="card-content">
+                <span class="card-title"><i class="material-icons left">info</i>Abrechnung</span>
+                <div class="row" style="margin-bottom: 0;">
+                    <div class="input-field col s6 m4">
+                        <input id="meta-monat" type="text" value="">
+                        <label for="meta-monat">Monat / Zeitraum</label>
+                    </div>
+                    <div class="input-field col s6 m4">
+                        <input id="meta-datum" type="text" class="datepicker">
+                        <label for="meta-datum" class="active">Datum</label>
+                    </div>
+                    <div class="col s12 m4" style="padding-top: 15px;">
+                        <span class="grey-text" id="display-name"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Display -->
+        <div class="card total-card">
+            <div class="card-content">
+                <span class="card-title"><i class="material-icons left">account_balance_wallet</i>Gesamtsumme</span>
+                <div class="sum-display" id="total-sum" style="color: white; font-size: 2rem;">0,00 €</div>
+            </div>
+        </div>
+
+        <!-- Expense Categories -->
+        <ul class="collapsible expandable">
+            <!-- 1. Fahrtkosten mit priv. Kfz -->
+            <li>
+                <div class="collapsible-header">
+                    <i class="material-icons">directions_car</i>
+                    <span class="header-text">1. Fahrtkosten mit priv. Kfz.</span>
+                    <div class="badge-container">
+                        <span class="badge" id="badge-fahrtkosten_kfz">0</span>
+                        <span class="sum-badge" id="sum-fahrtkosten_kfz">0,00 €</span>
+                    </div>
+                </div>
+                <div class="collapsible-body">
+                    <div id="list-fahrtkosten_kfz"></div>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="input-field col s6 m2">
+                            <input type="text" class="datepicker" id="fahrtkosten_kfz-datum">
+                            <label for="fahrtkosten_kfz-datum">Datum</label>
+                        </div>
+                        <div class="input-field col s6 m3">
+                            <input type="text" id="fahrtkosten_kfz-fahrstrecke">
+                            <label for="fahrtkosten_kfz-fahrstrecke">Fahrstrecke</label>
+                        </div>
+                        <div class="input-field col s6 m3">
+                            <input type="text" id="fahrtkosten_kfz-anlass">
+                            <label for="fahrtkosten_kfz-anlass">Anlaß</label>
+                        </div>
+                        <div class="input-field col s4 m2">
+                            <input type="number" id="fahrtkosten_kfz-km" step="1">
+                            <label for="fahrtkosten_kfz-km">km</label>
+                        </div>
+                        <div class="col s2 m2" style="margin-top: 25px;">
+                            <a class="btn-floating waves-effect waves-light" onclick="addExpense('fahrtkosten_kfz')">
+                                <i class="material-icons">add</i>
+                            </a>
+                        </div>
+                    </div>
+                    <p class="grey-text">Kilometerpauschale: 0,30 €/km</p>
+                </div>
+            </li>
+
+            <!-- 2. Fahrtkostenpauschale -->
+            <li>
+                <div class="collapsible-header">
+                    <i class="material-icons">train</i>
+                    <span class="header-text">2. Fahrtkostenpauschale</span>
+                    <div class="badge-container">
+                        <span class="badge" id="badge-fahrtkosten_pauschale">0</span>
+                        <span class="sum-badge" id="sum-fahrtkosten_pauschale">0,00 €</span>
+                    </div>
+                </div>
+                <div class="collapsible-body">
+                    <div id="list-fahrtkosten_pauschale"></div>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="input-field col s6 m3">
+                            <input type="text" id="fahrtkosten_pauschale-monat">
+                            <label for="fahrtkosten_pauschale-monat">Monat</label>
+                        </div>
+                        <div class="input-field col s6 m5">
+                            <input type="text" id="fahrtkosten_pauschale-beschreibung" value="i.H.v. RMV Ticket">
+                            <label for="fahrtkosten_pauschale-beschreibung" class="active">Beschreibung</label>
+                        </div>
+                        <div class="input-field col s4 m2">
+                            <input type="number" id="fahrtkosten_pauschale-betrag" step="0.01">
+                            <label for="fahrtkosten_pauschale-betrag">Betrag €</label>
+                        </div>
+                        <div class="col s2 m2" style="margin-top: 25px;">
+                            <a class="btn-floating waves-effect waves-light" onclick="addExpense('fahrtkosten_pauschale')">
+                                <i class="material-icons">add</i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </li>
+
+            <!-- 3. Bewirtungskosten -->
+            <li>
+                <div class="collapsible-header">
+                    <i class="material-icons">restaurant</i>
+                    <span class="header-text">3. Bewirtungskosten</span>
+                    <div class="badge-container">
+                        <span class="badge" id="badge-bewirtung">0</span>
+                        <span class="sum-badge" id="sum-bewirtung">0,00 €</span>
+                    </div>
+                </div>
+                <div class="collapsible-body">
+                    <div id="list-bewirtung"></div>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="input-field col s6 m2">
+                            <input type="text" class="datepicker" id="bewirtung-datum">
+                            <label for="bewirtung-datum">Datum</label>
+                        </div>
+                        <div class="input-field col s6 m6">
+                            <input type="text" id="bewirtung-personen">
+                            <label for="bewirtung-personen">Bewirtete Personen (auf Beleg)</label>
+                        </div>
+                        <div class="input-field col s4 m2">
+                            <input type="number" id="bewirtung-betrag" step="0.01">
+                            <label for="bewirtung-betrag">Betrag €</label>
+                        </div>
+                        <div class="col s2 m2" style="margin-top: 25px;">
+                            <a class="btn-floating waves-effect waves-light" onclick="addExpense('bewirtung')">
+                                <i class="material-icons">add</i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </li>
+
+            <!-- 4-8: Simple Categories -->
+            {% for cat_key, cat_name in [('fachliteratur', 'Fachliteratur'), ('bueromaterial', 'Büromaterial'), ('telefonkosten', 'Telefonkosten'), ('software', 'Software'), ('getraenke', 'Getränke')] %}
+            <li>
+                <div class="collapsible-header">
+                    <i class="material-icons">{% if cat_key == 'fachliteratur' %}book{% elif cat_key == 'bueromaterial' %}print{% elif cat_key == 'telefonkosten' %}phone{% elif cat_key == 'software' %}computer{% else %}local_cafe{% endif %}</i>
+                    <span class="header-text">{{ loop.index + 3 }}. {{ cat_name }}</span>
+                    <div class="badge-container">
+                        <span class="badge" id="badge-{{ cat_key }}">0</span>
+                        <span class="sum-badge" id="sum-{{ cat_key }}">0,00 €</span>
+                    </div>
+                </div>
+                <div class="collapsible-body">
+                    <div id="list-{{ cat_key }}"></div>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="input-field col s6 m2">
+                            <input type="text" class="datepicker" id="{{ cat_key }}-datum">
+                            <label for="{{ cat_key }}-datum">Datum</label>
+                        </div>
+                        <div class="input-field col s6 m6">
+                            <input type="text" id="{{ cat_key }}-beschreibung">
+                            <label for="{{ cat_key }}-beschreibung">Beschreibung</label>
+                        </div>
+                        <div class="input-field col s4 m2">
+                            <input type="number" id="{{ cat_key }}-betrag" step="0.01">
+                            <label for="{{ cat_key }}-betrag">Betrag €</label>
+                        </div>
+                        <div class="col s2 m2" style="margin-top: 25px;">
+                            <a class="btn-floating waves-effect waves-light" onclick="addExpense('{{ cat_key }}')">
+                                <i class="material-icons">add</i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </li>
+            {% endfor %}
+
+            <!-- 9. Sonstiges -->
+            <li>
+                <div class="collapsible-header">
+                    <i class="material-icons">more_horiz</i>
+                    <span class="header-text">9. Sonstiges</span>
+                    <div class="badge-container">
+                        <span class="badge" id="badge-sonstiges">0</span>
+                        <span class="sum-badge" id="sum-sonstiges">0,00 €</span>
+                    </div>
+                </div>
+                <div class="collapsible-body">
+                    <div id="list-sonstiges"></div>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="input-field col s6 m2">
+                            <select id="sonstiges-typ" onchange="onSonstigesTypChange()">
+                                <option value="Parken">Parken</option>
+                                <option value="Taxi">Taxi</option>
+                                <option value="Verpflegungspauschale">Verpflegungspauschale</option>
+                                <option value="Uber">Uber</option>
+                                <option value="Sonstiges">Sonstiges</option>
+                            </select>
+                            <label>Typ</label>
+                        </div>
+                        <div class="input-field col s6 m2">
+                            <input type="text" class="datepicker" id="sonstiges-datum">
+                            <label for="sonstiges-datum">Datum</label>
+                        </div>
+                        <div class="input-field col s6 m2" id="vp-land-container" style="display: none;">
+                            <select id="sonstiges-vp-land" onchange="onVPLandChange()">
+                                {% for land in verpflegungspauschalen.keys() %}
+                                <option value="{{ land }}">{{ land }}</option>
+                                {% endfor %}
+                            </select>
+                            <label>Land</label>
+                        </div>
+                        <div class="input-field col s6 m2" id="vp-dauer-container" style="display: none;">
+                            <select id="sonstiges-vp-dauer" onchange="onVPDauerChange()">
+                                <option value="halbtag">8-24h (Halbtag)</option>
+                                <option value="ganztag">24h+ (Ganztag)</option>
+                            </select>
+                            <label>Dauer</label>
+                        </div>
+                        <div class="input-field col s6 m2" id="ort-container">
+                            <input type="text" id="sonstiges-ort">
+                            <label for="sonstiges-ort">Ort / Beschreibung</label>
+                        </div>
+                        <div class="input-field col s4 m2">
+                            <input type="number" id="sonstiges-betrag" step="0.01">
+                            <label for="sonstiges-betrag">Betrag €</label>
+                        </div>
+                        <div class="col s2 m2" style="margin-top: 25px;">
+                            <a class="btn-floating waves-effect waves-light" onclick="addExpense('sonstiges')">
+                                <i class="material-icons">add</i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Export Buttons -->
+    <div class="export-section">
+        <a class="btn waves-effect waves-light green" onclick="saveToDatabase()" style="margin-right: 10px;">
+            <i class="material-icons left">save</i>Speichern
+        </a>
+        <a class="btn waves-effect waves-light blue" onclick="openLoadModal()" style="margin-right: 10px;">
+            <i class="material-icons left">folder_open</i>Laden
+        </a>
+        <a class="btn waves-effect waves-light" onclick="exportExcel()" style="margin-right: 10px;">
+            <i class="material-icons left">table_chart</i>Excel
+        </a>
+        <a class="btn waves-effect waves-light" onclick="exportPDF()">
+            <i class="material-icons left">picture_as_pdf</i>PDF
+        </a>
+    </div>
+
+    <!-- Load Modal -->
+    <div id="load-modal" class="modal">
+        <div class="modal-content">
+            <h4><i class="material-icons left">folder_open</i>Abrechnung laden</h4>
+            <div id="abrechnungen-list">
+                <p class="grey-text center">Lade Abrechnungen...</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a class="btn-flat waves-effect waves-light" onclick="newAbrechnung()">
+                <i class="material-icons left">add</i>Neue Abrechnung
+            </a>
+            <a href="#!" class="modal-close btn-flat">Schließen</a>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <h4><i class="material-icons left">edit</i>Eintrag bearbeiten</h4>
+            <input type="hidden" id="edit-category">
+            <input type="hidden" id="edit-index">
+            <div id="edit-fields"></div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Abbrechen</a>
+            <a href="#!" class="btn waves-effect waves-light" onclick="saveEdit()">
+                <i class="material-icons left">save</i>Speichern
+            </a>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <h4><i class="material-icons left">settings</i>Einstellungen</h4>
+            <p class="grey-text">Diese Daten werden lokal gespeichert und für alle Abrechnungen verwendet.</p>
+            <div class="row">
+                <div class="input-field col s12">
+                    <input id="settings-name" type="text">
+                    <label for="settings-name">Name</label>
+                </div>
+                <div class="input-field col s12">
+                    <input id="settings-iban" type="text" placeholder="DE00 0000 0000 0000 0000 00">
+                    <label for="settings-iban" class="active">IBAN</label>
+                </div>
+                <div class="input-field col s12">
+                    <input id="settings-bic" type="text" placeholder="DEUTDEDB">
+                    <label for="settings-bic" class="active">BIC (optional)</label>
+                </div>
+                <div class="input-field col s12">
+                    <input id="settings-bank" type="text" placeholder="Deutsche Bank">
+                    <label for="settings-bank" class="active">Bank (optional)</label>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Abbrechen</a>
+            <a href="#!" class="btn waves-effect waves-light" onclick="saveSettings()">
+                <i class="material-icons left">save</i>Speichern
+            </a>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <script>
+        // Data storage
+        const expenses = {
+            fahrtkosten_kfz: [],
+            fahrtkosten_pauschale: [],
+            bewirtung: [],
+            fachliteratur: [],
+            bueromaterial: [],
+            telefonkosten: [],
+            software: [],
+            getraenke: [],
+            sonstiges: []
+        };
+
+        const categoryConfig = {
+            fahrtkosten_kfz: { fields: ['datum', 'fahrstrecke', 'anlass', 'km'], rate: 0.30 },
+            fahrtkosten_pauschale: { fields: ['monat', 'beschreibung', 'betrag'] },
+            bewirtung: { fields: ['datum', 'personen', 'betrag'] },
+            fachliteratur: { fields: ['datum', 'beschreibung', 'betrag'] },
+            bueromaterial: { fields: ['datum', 'beschreibung', 'betrag'] },
+            telefonkosten: { fields: ['datum', 'beschreibung', 'betrag'] },
+            software: { fields: ['datum', 'beschreibung', 'betrag'] },
+            getraenke: { fields: ['datum', 'beschreibung', 'betrag'] },
+            sonstiges: { fields: ['typ', 'datum', 'ort', 'betrag'] }
+        };
+
+        // Initialize Materialize components
+        document.addEventListener('DOMContentLoaded', function() {
+            M.Collapsible.init(document.querySelectorAll('.collapsible'), { accordion: false });
+            M.Datepicker.init(document.querySelectorAll('.datepicker'), {
+                format: 'dd.mm.yyyy',
+                firstDay: 1,
+                i18n: {
+                    months: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+                    monthsShort: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+                    weekdays: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+                    weekdaysShort: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+                    weekdaysAbbrev: ['S', 'M', 'D', 'M', 'D', 'F', 'S'],
+                    cancel: 'Abbrechen',
+                    done: 'OK'
+                }
+            });
+            M.FormSelect.init(document.querySelectorAll('select'));
+            
+            // Set today's date
+            const today = new Date();
+            document.getElementById('meta-datum').value = today.toLocaleDateString('de-DE');
+            
+            // Load from localStorage
+            loadData();
+        });
+
+        function addExpense(category) {
+            const config = categoryConfig[category];
+            const expense = {};
+            
+            config.fields.forEach(field => {
+                const input = document.getElementById(`${category}-${field}`);
+                if (input.tagName === 'SELECT') {
+                    expense[field] = input.options[input.selectedIndex].value;
+                } else {
+                    expense[field] = input.value;
+                }
+                if (input.tagName !== 'SELECT') input.value = '';
+            });
+            
+            if (category === 'fahrtkosten_kfz' && !expense.km) return;
+            if (category !== 'fahrtkosten_kfz' && !expense.betrag) return;
+            
+            expenses[category].push(expense);
+            renderCategory(category);
+            updateTotals();
+            saveData();
+            M.toast({html: 'Eintrag hinzugefügt', classes: 'rounded'});
+        }
+
+        function deleteExpense(category, index) {
+            expenses[category].splice(index, 1);
+            renderCategory(category);
+            updateTotals();
+            saveData();
+        }
+
+        function renderCategory(category) {
+            const list = document.getElementById(`list-${category}`);
+            const config = categoryConfig[category];
+            
+            if (expenses[category].length === 0) {
+                list.innerHTML = '<p class="grey-text center">Keine Einträge</p>';
+                return;
+            }
+            
+            let html = '';
+            expenses[category].forEach((exp, index) => {
+                let betrag = 0;
+                let details = '';
+                
+                if (category === 'fahrtkosten_kfz') {
+                    betrag = parseFloat(exp.km || 0) * 0.30;
+                    details = `${exp.datum} | ${exp.fahrstrecke} | ${exp.anlass} | ${exp.km} km`;
+                } else if (category === 'sonstiges') {
+                    betrag = parseFloat(exp.betrag || 0);
+                    details = `${exp.typ} | ${exp.datum} | ${exp.ort}`;
+                } else if (category === 'bewirtung') {
+                    betrag = parseFloat(exp.betrag || 0);
+                    details = `${exp.datum} | ${exp.personen}`;
+                } else {
+                    betrag = parseFloat(exp.betrag || 0);
+                    details = `${exp.datum || exp.monat} | ${exp.beschreibung}`;
+                }
+                
+                html += `
+                    <div class="expense-item row valign-wrapper" style="margin-bottom: 5px;">
+                        <div class="col s7 m8">${details}</div>
+                        <div class="col s3 m2 right-align"><strong>${betrag.toFixed(2)} €</strong></div>
+                        <div class="col s2 m2 right-align">
+                            <i class="material-icons delete-btn" onclick="editExpense('${category}', ${index})" style="margin-right: 10px;" title="Bearbeiten">edit</i>
+                            <i class="material-icons delete-btn" onclick="deleteExpense('${category}', ${index})" title="Löschen">delete</i>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            list.innerHTML = html;
+            document.getElementById(`badge-${category}`).textContent = expenses[category].length;
+        }
+
+        function calculateCategorySum(category) {
+            return expenses[category].reduce((sum, exp) => {
+                if (category === 'fahrtkosten_kfz') {
+                    return sum + (parseFloat(exp.km || 0) * 0.30);
+                }
+                return sum + parseFloat(exp.betrag || 0);
+            }, 0);
+        }
+
+        function updateTotals() {
+            let total = 0;
+            Object.keys(expenses).forEach(category => {
+                const sum = calculateCategorySum(category);
+                const sumBadge = document.getElementById(`sum-${category}`);
+                sumBadge.textContent = sum.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+                if (sum > 0) {
+                    sumBadge.classList.add('has-value');
+                } else {
+                    sumBadge.classList.remove('has-value');
+                }
+                total += sum;
+            });
+            document.getElementById('total-sum').textContent = total.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+        }
+
+        function getMeta() {
+            return {
+                monat: document.getElementById('meta-monat').value,
+                name: userSettings.name,
+                datum: document.getElementById('meta-datum').value,
+                iban: userSettings.iban,
+                bic: userSettings.bic,
+                bank: userSettings.bank
+            };
+        }
+
+        function exportExcel() {
+            const data = { meta: getMeta(), expenses: expenses };
+            fetch('/export/excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Spesen_${getMeta().monat.replace(' ', '_')}.xlsx`;
+                a.click();
+                M.toast({html: 'Excel exportiert', classes: 'rounded green'});
+            });
+        }
+
+        function exportPDF() {
+            const data = { meta: getMeta(), expenses: expenses };
+            fetch('/export/pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Spesen_${getMeta().monat.replace(' ', '_')}.pdf`;
+                a.click();
+                M.toast({html: 'PDF exportiert', classes: 'rounded green'});
+            });
+        }
+
+        function saveData() {
+            localStorage.setItem('spesen-data', JSON.stringify({ meta: getMeta(), expenses: expenses }));
+        }
+
+        function loadData() {
+            const saved = localStorage.getItem('spesen-data');
+            if (saved) {
+                const data = JSON.parse(saved);
+                if (data.meta) {
+                    document.getElementById('meta-monat').value = data.meta.monat || '';
+                    document.getElementById('meta-name').value = data.meta.name || '';
+                    document.getElementById('meta-konto').value = data.meta.konto || '';
+                    document.getElementById('meta-blz').value = data.meta.blz || '';
+                    M.updateTextFields();
+                }
+                if (data.expenses) {
+                    Object.assign(expenses, data.expenses);
+                    Object.keys(expenses).forEach(renderCategory);
+                    updateTotals();
+                }
+            }
+        }
+
+        // SQLite Database Functions
+        let currentAbrechnungId = null;
+
+        function saveToDatabase() {
+            const meta = getMeta();
+            if (currentAbrechnungId) {
+                meta.id = currentAbrechnungId;
+            }
+
+            fetch('/api/abrechnungen', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ meta: meta, expenses: expenses })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    currentAbrechnungId = data.id;
+                    M.toast({html: 'Gespeichert in Datenbank!', classes: 'rounded green'});
+                } else {
+                    M.toast({html: 'Fehler beim Speichern', classes: 'rounded red'});
+                }
+            })
+            .catch(err => {
+                M.toast({html: 'Fehler: ' + err.message, classes: 'rounded red'});
+            });
+        }
+
+        function openLoadModal() {
+            const modal = M.Modal.getInstance(document.getElementById('load-modal'));
+            modal.open();
+            loadAbrechnungenList();
+        }
+
+        function loadAbrechnungenList() {
+            const listDiv = document.getElementById('abrechnungen-list');
+            listDiv.innerHTML = '<p class="grey-text center">Lade...</p>';
+
+            fetch('/api/abrechnungen')
+            .then(response => response.json())
+            .then(data => {
+                if (data.length === 0) {
+                    listDiv.innerHTML = '<p class="grey-text center">Keine gespeicherten Abrechnungen</p>';
+                    return;
+                }
+
+                let html = '<ul class="collection">';
+                data.forEach(abr => {
+                    html += `
+                        <li class="collection-item">
+                            <div>
+                                <strong>${abr.name}</strong> - ${abr.monat}
+                                <span class="grey-text"> (${abr.datum || 'kein Datum'})</span>
+                                <a href="#!" class="secondary-content" onclick="deleteAbrechnung(${abr.id}, event)" title="Löschen">
+                                    <i class="material-icons red-text">delete</i>
+                                </a>
+                                <a href="#!" class="secondary-content" onclick="loadAbrechnung(${abr.id})" style="margin-right: 20px;" title="Laden">
+                                    <i class="material-icons blue-text">open_in_new</i>
+                                </a>
+                            </div>
+                        </li>
+                    `;
+                });
+                html += '</ul>';
+                listDiv.innerHTML = html;
+            })
+            .catch(err => {
+                listDiv.innerHTML = '<p class="red-text center">Fehler beim Laden</p>';
+            });
+        }
+
+        function loadAbrechnung(id) {
+            fetch(`/api/abrechnungen/${id}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    M.toast({html: 'Abrechnung nicht gefunden', classes: 'rounded red'});
+                    return;
+                }
+
+                // Meta-Daten setzen
+                currentAbrechnungId = data.meta.id;
+                document.getElementById('meta-monat').value = data.meta.monat || '';
+                document.getElementById('meta-datum').value = data.meta.datum || '';
+                M.updateTextFields();
+
+                // Ausgaben laden
+                Object.keys(expenses).forEach(key => expenses[key] = []);
+                Object.assign(expenses, data.expenses);
+                Object.keys(expenses).forEach(renderCategory);
+                updateTotals();
+
+                // Modal schließen
+                const modal = M.Modal.getInstance(document.getElementById('load-modal'));
+                modal.close();
+
+                M.toast({html: `${data.meta.monat} geladen`, classes: 'rounded green'});
+            })
+            .catch(err => {
+                M.toast({html: 'Fehler beim Laden: ' + err.message, classes: 'rounded red'});
+            });
+        }
+
+        function deleteAbrechnung(id, event) {
+            event.stopPropagation();
+            if (!confirm('Abrechnung wirklich löschen?')) return;
+
+            fetch(`/api/abrechnungen/${id}`, { method: 'DELETE' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (currentAbrechnungId === id) {
+                        currentAbrechnungId = null;
+                    }
+                    M.toast({html: 'Gelöscht', classes: 'rounded'});
+                    loadAbrechnungenList();
+                }
+            });
+        }
+
+        function newAbrechnung() {
+            currentAbrechnungId = null;
+            Object.keys(expenses).forEach(key => expenses[key] = []);
+            Object.keys(expenses).forEach(renderCategory);
+            updateTotals();
+
+            document.getElementById('meta-monat').value = '';
+            document.getElementById('meta-datum').value = new Date().toLocaleDateString('de-DE');
+            M.updateTextFields();
+
+            const modal = M.Modal.getInstance(document.getElementById('load-modal'));
+            modal.close();
+
+            M.toast({html: 'Neue Abrechnung', classes: 'rounded'});
+        }
+
+        // Initialize modal
+        document.addEventListener('DOMContentLoaded', function() {
+            M.Modal.init(document.querySelectorAll('.modal'));
+            loadSettings();
+        });
+
+        // Settings functions
+        let userSettings = {
+            name: '',
+            iban: '',
+            bic: '',
+            bank: ''
+        };
+
+        function openSettings() {
+            document.getElementById('settings-name').value = userSettings.name || '';
+            document.getElementById('settings-iban').value = userSettings.iban || '';
+            document.getElementById('settings-bic').value = userSettings.bic || '';
+            document.getElementById('settings-bank').value = userSettings.bank || '';
+            M.updateTextFields();
+
+            const modal = M.Modal.getInstance(document.getElementById('settings-modal'));
+            modal.open();
+        }
+
+        function saveSettings() {
+            userSettings.name = document.getElementById('settings-name').value;
+            userSettings.iban = document.getElementById('settings-iban').value;
+            userSettings.bic = document.getElementById('settings-bic').value;
+            userSettings.bank = document.getElementById('settings-bank').value;
+
+            // Save to SQLite via API (encrypted)
+            fetch('/api/einstellungen', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userSettings)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateDisplayName();
+                    const modal = M.Modal.getInstance(document.getElementById('settings-modal'));
+                    modal.close();
+                    M.toast({html: 'Einstellungen gespeichert (verschlüsselt)', classes: 'rounded green'});
+                } else {
+                    M.toast({html: 'Fehler beim Speichern', classes: 'rounded red'});
+                }
+            })
+            .catch(err => {
+                M.toast({html: 'Fehler: ' + err.message, classes: 'rounded red'});
+            });
+        }
+
+        function loadSettings() {
+            fetch('/api/einstellungen')
+            .then(response => response.json())
+            .then(data => {
+                userSettings = data;
+                updateDisplayName();
+
+                // Wenn keine Einstellungen vorhanden, Hinweis zeigen
+                if (!userSettings.name) {
+                    setTimeout(() => {
+                        M.toast({html: 'Bitte Einstellungen ausfüllen (Zahnrad oben rechts)', classes: 'rounded'});
+                    }, 1000);
+                }
+            })
+            .catch(err => {
+                console.error('Fehler beim Laden der Einstellungen:', err);
+            });
+        }
+
+        function updateDisplayName() {
+            const displayEl = document.getElementById('display-name');
+            if (userSettings.name) {
+                displayEl.textContent = userSettings.name;
+            } else {
+                displayEl.innerHTML = '<em>Name in Einstellungen hinterlegen</em>';
+            }
+        }
+
+        // Verpflegungspauschalen 2025
+        const verpflegungspauschalen = {{ verpflegungspauschalen | tojson }};
+
+        function onSonstigesTypChange() {
+            const typ = document.getElementById('sonstiges-typ').value;
+            const vpLandContainer = document.getElementById('vp-land-container');
+            const vpDauerContainer = document.getElementById('vp-dauer-container');
+            const ortContainer = document.getElementById('ort-container');
+
+            if (typ === 'Verpflegungspauschale') {
+                vpLandContainer.style.display = 'block';
+                vpDauerContainer.style.display = 'block';
+                ortContainer.style.display = 'none';
+                M.FormSelect.init(document.getElementById('sonstiges-vp-land'));
+                M.FormSelect.init(document.getElementById('sonstiges-vp-dauer'));
+                updateVPBetrag();
+            } else {
+                vpLandContainer.style.display = 'none';
+                vpDauerContainer.style.display = 'none';
+                ortContainer.style.display = 'block';
+                document.getElementById('sonstiges-betrag').value = '';
+            }
+        }
+
+        function onVPLandChange() {
+            updateVPBetrag();
+        }
+
+        function onVPDauerChange() {
+            updateVPBetrag();
+        }
+
+        function updateVPBetrag() {
+            const land = document.getElementById('sonstiges-vp-land').value;
+            const dauer = document.getElementById('sonstiges-vp-dauer').value;
+
+            if (verpflegungspauschalen[land]) {
+                const betrag = verpflegungspauschalen[land][dauer];
+                document.getElementById('sonstiges-betrag').value = betrag.toFixed(2);
+                // Ort-Feld mit Land und Dauer füllen
+                const dauerText = dauer === 'ganztag' ? '24h+' : '8-24h';
+                document.getElementById('sonstiges-ort').value = `${land} (${dauerText})`;
+            }
+        }
+
+        // Edit-Funktionen
+        const fieldLabels = {
+            datum: 'Datum',
+            fahrstrecke: 'Fahrstrecke',
+            anlass: 'Anlaß',
+            km: 'Kilometer',
+            monat: 'Monat',
+            beschreibung: 'Beschreibung',
+            betrag: 'Betrag €',
+            personen: 'Bewirtete Personen',
+            typ: 'Typ',
+            ort: 'Ort / Beschreibung'
+        };
+
+        function editExpense(category, index) {
+            const expense = expenses[category][index];
+            const config = categoryConfig[category];
+
+            document.getElementById('edit-category').value = category;
+            document.getElementById('edit-index').value = index;
+
+            let html = '<div class="row">';
+            config.fields.forEach(field => {
+                const value = expense[field] || '';
+                const label = fieldLabels[field] || field;
+
+                if (field === 'typ' && category === 'sonstiges') {
+                    html += `
+                        <div class="input-field col s12 m6">
+                            <select id="edit-${field}">
+                                <option value="Parken" ${value === 'Parken' ? 'selected' : ''}>Parken</option>
+                                <option value="Taxi" ${value === 'Taxi' ? 'selected' : ''}>Taxi</option>
+                                <option value="Verpflegungspauschale" ${value === 'Verpflegungspauschale' ? 'selected' : ''}>Verpflegungspauschale</option>
+                                <option value="Uber" ${value === 'Uber' ? 'selected' : ''}>Uber</option>
+                                <option value="Sonstiges" ${value === 'Sonstiges' ? 'selected' : ''}>Sonstiges</option>
+                            </select>
+                            <label>${label}</label>
+                        </div>
+                    `;
+                } else if (field === 'km' || field === 'betrag') {
+                    html += `
+                        <div class="input-field col s12 m6">
+                            <input type="number" id="edit-${field}" value="${value}" step="${field === 'km' ? '1' : '0.01'}">
+                            <label class="active" for="edit-${field}">${label}</label>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="input-field col s12 m6">
+                            <input type="text" id="edit-${field}" value="${value}">
+                            <label class="active" for="edit-${field}">${label}</label>
+                        </div>
+                    `;
+                }
+            });
+            html += '</div>';
+
+            document.getElementById('edit-fields').innerHTML = html;
+
+            // Initialize select elements
+            M.FormSelect.init(document.querySelectorAll('#edit-modal select'));
+
+            const modal = M.Modal.getInstance(document.getElementById('edit-modal'));
+            modal.open();
+        }
+
+        function saveEdit() {
+            const category = document.getElementById('edit-category').value;
+            const index = parseInt(document.getElementById('edit-index').value);
+            const config = categoryConfig[category];
+
+            const updatedExpense = {};
+            config.fields.forEach(field => {
+                const input = document.getElementById(`edit-${field}`);
+                if (input.tagName === 'SELECT') {
+                    updatedExpense[field] = input.options[input.selectedIndex].value;
+                } else {
+                    updatedExpense[field] = input.value;
+                }
+            });
+
+            expenses[category][index] = updatedExpense;
+            renderCategory(category);
+            updateTotals();
+            saveData();
+
+            const modal = M.Modal.getInstance(document.getElementById('edit-modal'));
+            modal.close();
+
+            M.toast({html: 'Eintrag aktualisiert', classes: 'rounded green'});
+        }
+    </script>
+</body>
+</html>
