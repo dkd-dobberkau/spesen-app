@@ -278,6 +278,51 @@ def get_export_dir(monat_str):
     return export_path
 
 
+# Archiv-Verzeichnis für verarbeitete Belege
+ARCHIV_DIR = os.environ.get('ARCHIV_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'belege', 'archiv'))
+
+
+def get_archiv_dir(monat_str):
+    """
+    Erstellt den Archiv-Pfad im Format: belege/archiv/2025/11_November/
+    Gibt den Pfad zurück und erstellt das Verzeichnis falls nötig.
+    """
+    year, month = parse_monat_string(monat_str)
+    month_name = MONAT_NAMEN.get(month, f'{month:02d}')
+
+    archiv_path = os.path.join(ARCHIV_DIR, str(year), f'{month:02d}_{month_name}')
+    os.makedirs(archiv_path, exist_ok=True)
+
+    return archiv_path
+
+
+def archive_file(filepath, monat_str):
+    """
+    Verschiebt eine Datei ins Archiv-Verzeichnis.
+    Gibt den neuen Pfad zurück oder None bei Fehler.
+    """
+    import shutil
+
+    archiv_dir = get_archiv_dir(monat_str)
+    filename = os.path.basename(filepath)
+    target_path = os.path.join(archiv_dir, filename)
+
+    # Bei Namenskonflikt: Nummer anhängen
+    if os.path.exists(target_path):
+        stem, suffix = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(target_path):
+            target_path = os.path.join(archiv_dir, f"{stem}_{counter}{suffix}")
+            counter += 1
+
+    try:
+        shutil.move(str(filepath), str(target_path))
+        return target_path
+    except Exception as e:
+        print(f"⚠️  Archivierung fehlgeschlagen für {filename}: {e}")
+        return None
+
+
 CATEGORIES = {
     'fahrtkosten_kfz': 'Fahrtkosten mit priv. Kfz.',
     'fahrtkosten_pauschale': 'Fahrtkostenpauschale',
@@ -743,7 +788,12 @@ Beispiele:
   python cli.py /pfad/zu/belegen
   python cli.py /pfad/zu/belegen --name "Max Mustermann" --monat "Dez 2025"
   python cli.py /pfad/zu/belegen --output abrechnung.xlsx --format excel
-  python cli.py /pfad/zu/belegen --output abrechnung.pdf --format pdf
+  python cli.py belege/inbox --monat "Dez 2025" --archive
+
+Inbox/Archiv Workflow:
+  1. Belege in belege/inbox/ ablegen
+  2. python cli.py belege/inbox --monat "Dez 2025" --archive
+  3. Belege werden nach belege/archiv/2025/12_Dezember/ verschoben
         """
     )
 
@@ -757,6 +807,8 @@ Beispiele:
                         help='NICHT in Datenbank speichern (Standard: speichert in DB)')
     parser.add_argument('--no-cache', action='store_true',
                         help='Cache ignorieren und alle Belege neu verarbeiten')
+    parser.add_argument('--archive', '-a', action='store_true',
+                        help='Verarbeitete Belege ins Archiv verschieben (belege/archiv/Jahr/Monat/)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Ausführliche Ausgabe')
 
     args = parser.parse_args()
@@ -793,6 +845,7 @@ Beispiele:
     # Belege verarbeiten
     expenses = []
     errors = []
+    processed_files = []  # Erfolgreich verarbeitete Dateien für Archivierung
 
     for i, filepath in enumerate(files, 1):
         filename = os.path.basename(filepath)
@@ -818,6 +871,7 @@ Beispiele:
                 conversion_indicator = ""
 
             expenses.append(data)
+            processed_files.append(filepath)  # Für Archivierung merken
             print(f"✅ {original_betrag} {original_waehrung} - {data.get('kategorie', '?')}{conversion_indicator}{cache_indicator}")
             if args.verbose:
                 print(f"         → {data.get('beschreibung', '')} ({data.get('anbieter', '')})")
@@ -890,6 +944,19 @@ Beispiele:
             json.dump({'meta': meta, 'expenses': expenses, 'total': total}, f,
                      ensure_ascii=False, indent=2)
         print(f"\n📋 JSON exportiert: {json_path}")
+
+    # Archivierung (optional)
+    if args.archive and processed_files:
+        print(f"\n📦 Archiviere {len(processed_files)} Belege...")
+        archiv_dir = get_archiv_dir(meta.get('monat', ''))
+        archived_count = 0
+        for filepath in processed_files:
+            result = archive_file(filepath, meta.get('monat', ''))
+            if result:
+                archived_count += 1
+                if args.verbose:
+                    print(f"   → {os.path.basename(filepath)}")
+        print(f"✅ {archived_count} Belege archiviert nach: {archiv_dir}")
 
     print(f"\n✨ Fertig!")
 

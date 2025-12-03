@@ -46,14 +46,15 @@ services:
       - ./data:/app/data
       - ./exports:/app/exports
       - ./logs:/app/logs
-      # Beleg-Ordner mounten (anpassen!)
-      - ~/Documents/Scans:/data/belege:ro
-      - ~/Desktop/Belege:/data/uber:ro
+      # Beleg-Ordner (inbox für neue Belege, archiv wird automatisch erstellt)
+      - ./belege:/app/belege
     environment:
       - PYTHONUNBUFFERED=1
       - GUNICORN_WORKERS=4
       - LOG_LEVEL=info
       - DATA_DIR=/app/data
+      - EXPORTS_DIR=/app/exports
+      - ARCHIV_DIR=/app/belege/archiv
     env_file:
       - .env
     networks:
@@ -86,7 +87,11 @@ services:
       - ./data:/app/data
       - ./exports:/app/exports
       - ./logs:/app/logs
-      - ~/Documents/Scans:/data/belege:ro
+      - ./belege:/app/belege
+    environment:
+      - DATA_DIR=/app/data
+      - EXPORTS_DIR=/app/exports
+      - ARCHIV_DIR=/app/belege/archiv
     env_file:
       - .env
     networks:

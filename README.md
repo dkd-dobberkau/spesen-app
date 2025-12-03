@@ -7,14 +7,33 @@ Automatische Spesenabrechnung mit KI-gestützter Belegerkennung.
 - **Web-App**: Flask-basierte Oberfläche zur Verwaltung von Spesenabrechnungen
 - **CLI-Tool**: Batch-Verarbeitung von Belegen aus einem Ordner
 - **KI-Erkennung**: Claude AI analysiert Belege und extrahiert Daten automatisch
+- **Währungsumrechnung**: Automatische Konvertierung von Fremdwährungen (EZB-Kurse)
 - **Kategorien**: Fahrtkosten, Bewirtung, Telefonkosten, Uber/Taxi, etc.
-- **Export**: Excel und PDF
-- **Caching**: Bereits verarbeitete Belege werden gecacht
+- **Export**: Excel und PDF (organisiert nach Jahr/Monat)
+- **Inbox/Archiv**: Automatische Archivierung verarbeiteter Belege
+- **Caching**: Bereits verarbeitete Belege werden gecacht (MD5-basiert)
 - **Production-Ready**: Gunicorn WSGI-Server + Traefik Reverse Proxy
 
 ## Schnellstart
 
-### Mit uv (empfohlen)
+### Mit Docker (empfohlen)
+
+```bash
+# .env erstellen
+cp .env.example .env
+# ANTHROPIC_API_KEY in .env eintragen
+
+# Container starten
+docker compose up -d
+
+# Web-App: http://localhost (Port 80)
+
+# Belege verarbeiten (mit Archivierung)
+docker compose exec app python cli.py /app/belege/inbox \
+    --name "Max Mustermann" --monat "Dez 2025" --archive
+```
+
+### Mit uv (lokal)
 
 ```bash
 # uv installieren (falls nicht vorhanden)
@@ -31,16 +50,15 @@ cp .env.example .env
 uv run python app.py
 
 # CLI verwenden
-uv run python cli.py /pfad/zu/belegen --name "Max Mustermann" --monat "Dez 2025" --save-db -v
+uv run python cli.py belege/inbox --name "Max Mustermann" --monat "Dez 2025" --archive
 ```
 
-### Mit pip
+### Mit pip (lokal)
 
 ```bash
 # Virtual Environment erstellen
 python3 -m venv venv
 source venv/bin/activate  # Linux/Mac
-# oder: venv\Scripts\activate  # Windows
 
 # Dependencies installieren
 pip install -r requirements.txt
@@ -60,65 +78,49 @@ cp .env.example .env
 python app.py
 ```
 
-### Mit Docker (Entwicklung)
+## Ordnerstruktur
 
-```bash
-# .env erstellen
-cp .env.example .env
-# ANTHROPIC_API_KEY in .env eintragen
-
-# Einfaches Setup ohne Reverse Proxy
-docker compose -f docker-compose.simple.yml up -d
-
-# Web-App: http://localhost:5001
-
-# CLI im Container ausführen
-docker compose exec app python cli.py /data/belege --name "Name" --monat "Dez 2025" -v
 ```
-
-### Mit Docker (Production)
-
-```bash
-# .env erstellen mit Production-Einstellungen
-cp .env.example .env
-
-# Vollständiges Setup mit Traefik Reverse Proxy
-docker compose up -d
-
-# Web-App: http://localhost (Port 80)
-# Traefik Dashboard: http://localhost:8080
-
-# Für HTTPS: Zeilen in docker-compose.yml auskommentieren
-# und Domain + E-Mail anpassen
+spesen-app/
+├── belege/
+│   ├── inbox/              # Neue Belege hierher legen
+│   └── archiv/             # Automatisch nach Verarbeitung
+│       └── 2025/
+│           └── 12_Dezember/
+├── exports/                # Generierte Abrechnungen
+│   └── 2025/
+│       └── 12_Dezember/
+│           ├── Spesen_Dez_2025.xlsx
+│           ├── Spesen_Dez_2025.pdf
+│           └── bewirtungsbelege/
+├── data/                   # SQLite DB, Cache
+└── logs/                   # Gunicorn Logs
 ```
-
-## Docker-Konfigurationen
-
-| Datei | Beschreibung |
-|-------|--------------|
-| `docker-compose.simple.yml` | Einfaches Setup ohne Reverse Proxy (Port 5001) |
-| `docker-compose.yml` | Production mit Traefik, HTTPS-ready |
-
-### Production-Features
-
-- **Gunicorn** WSGI-Server (multi-worker)
-- **Traefik** Reverse Proxy
-- **Let's Encrypt** HTTPS (konfigurierbar)
-- **Health Checks** für Container-Orchestrierung
-- **Logging** in `/app/logs/`
-- **Non-root User** im Container
 
 ## CLI-Verwendung
 
+### Inbox/Archiv Workflow (empfohlen)
+
 ```bash
-# Belege verarbeiten und Excel/PDF exportieren
+# 1. Belege in inbox ablegen
+cp *.pdf belege/inbox/
+
+# 2. Verarbeiten und automatisch archivieren
+docker compose exec app python cli.py /app/belege/inbox \
+    --name "Max Mustermann" --monat "Dez 2025" --archive
+
+# → Belege werden nach belege/archiv/2025/12_Dezember/ verschoben
+# → Export in exports/2025/12_Dezember/
+```
+
+### Klassische Verwendung
+
+```bash
+# Belege verarbeiten (speichert automatisch in DB)
 python cli.py /pfad/zu/belegen --name "Max Mustermann" --monat "Dez 2025"
 
-# Mit Datenbank-Speicherung (für Web-App sichtbar)
-python cli.py /pfad/zu/belegen --name "Max Mustermann" --monat "Dez 2025" --save-db
-
-# Ausführliche Ausgabe
-python cli.py /pfad/zu/belegen -n "Max Mustermann" -m "Dez 2025" -s -v
+# Ohne Datenbank-Speicherung
+python cli.py /pfad/zu/belegen --monat "Dez 2025" --no-db
 
 # Cache ignorieren (alle Belege neu verarbeiten)
 python cli.py /pfad/zu/belegen --no-cache
@@ -133,20 +135,52 @@ python cli.py /pfad/zu/belegen --format json
 |--------|------|--------------|
 | `--name` | `-n` | Name für die Abrechnung |
 | `--monat` | `-m` | Monat/Zeitraum (z.B. "Dez 2025") |
-| `--output` | `-o` | Ausgabedatei |
+| `--output` | `-o` | Ausgabedatei (überschreibt auto-Pfad) |
 | `--format` | `-f` | Format: excel, pdf, both, json |
-| `--save-db` | `-s` | In Datenbank speichern |
+| `--archive` | `-a` | Belege nach Verarbeitung archivieren |
+| `--no-db` | | NICHT in Datenbank speichern |
 | `--no-cache` | | Cache ignorieren |
 | `--verbose` | `-v` | Ausführliche Ausgabe |
+
+### Shell-Wrapper
+
+```bash
+# Automatische Docker/Local-Erkennung
+./spesen scan belege/inbox --monat "Dez 2025" --archive
+./spesen sort /pfad/zu/belegen --dry-run
+```
+
+## Docker-Konfigurationen
+
+| Datei | Beschreibung |
+|-------|--------------|
+| `docker-compose.yml` | Production mit Traefik, HTTPS-ready |
+| `docker-compose.simple.yml` | Einfaches Setup ohne Reverse Proxy (Port 5001) |
+
+### Production-Features
+
+- **Gunicorn** WSGI-Server (multi-worker)
+- **Traefik** Reverse Proxy
+- **Let's Encrypt** HTTPS (konfigurierbar)
+- **Health Checks** für Container-Orchestrierung
+- **Logging** in `/app/logs/`
+- **Non-root User** im Container
 
 ## Unterstützte Belegtypen
 
 - **Fahrtkosten KFZ**: Tankbelege (Benzin, Diesel)
 - **Fahrtkostenpauschale**: ÖPNV-Tickets, Bahnfahrkarten
-- **Bewirtung**: Restaurant, Bar, Café
+- **Bewirtung**: Restaurant, Bar, Café (+ Bewirtungsbeleg-PDF)
 - **Uber/Taxi**: Automatische Stadt- und km-Erkennung
 - **Telefonkosten**: Prepaid-Aufladungen, Mobilfunk
 - **Sonstiges**: Parken, Hotel, etc.
+
+## Währungsumrechnung
+
+Fremdwährungen (CHF, DKK, USD, etc.) werden automatisch nach EUR konvertiert:
+- Aktuelle Kurse von der EZB (European Central Bank)
+- Fallback-Kurse wenn offline
+- Original-Betrag wird in der Beschreibung vermerkt
 
 ## Konfiguration
 
@@ -155,33 +189,17 @@ python cli.py /pfad/zu/belegen --format json
 ```env
 ANTHROPIC_API_KEY=sk-ant-api03-...
 
-# Optional für Production
+# Optional
 GUNICORN_WORKERS=4
 LOG_LEVEL=info
+DATA_DIR=/app/data
+EXPORTS_DIR=/app/exports
+ARCHIV_DIR=/app/belege/archiv
 ```
 
 ### Verpflegungspauschalen
 
 Die App enthält die deutschen Verpflegungspauschalen 2025 für verschiedene Länder.
-
-## Projektstruktur
-
-```
-spesen-app/
-├── app.py                    # Flask Web-App
-├── cli.py                    # CLI-Tool
-├── gunicorn.conf.py          # Gunicorn WSGI-Config
-├── templates/
-│   └── index.html            # Web-UI
-├── requirements.txt          # pip Dependencies
-├── pyproject.toml            # uv/pip Projekt-Config
-├── Dockerfile                # Multi-stage Docker Image
-├── docker-compose.yml        # Production mit Traefik
-├── docker-compose.simple.yml # Entwicklung ohne Proxy
-├── .env.example              # Beispiel-Konfiguration
-├── .gitignore
-└── README.md
-```
 
 ## API-Endpoints
 
@@ -194,14 +212,16 @@ spesen-app/
 | `/api/parse-beleg` | POST | Beleg mit KI analysieren |
 | `/export/excel` | POST | Excel-Export |
 | `/export/pdf` | POST | PDF-Export |
+| `/export/bewirtungsbeleg` | POST | Bewirtungsbeleg nach §4 EStG |
 
 ## Datenbank
 
-SQLite-Datenbank (`spesen.db`) mit folgenden Tabellen:
+SQLite-Datenbank (`data/spesen.db`) mit folgenden Tabellen:
 
 - `abrechnungen`: Spesenabrechungen (Name, Monat, Datum)
-- `ausgaben`: Einzelne Ausgaben pro Abrechnung
+- `ausgaben`: Einzelne Ausgaben pro Abrechnung (JSON-Daten)
 - `einstellungen`: Benutzereinstellungen (Name, IBAN verschlüsselt)
+- `personen`: Gespeicherte Personen für Bewirtungsbelege
 
 ## Sicherheit
 
@@ -210,18 +230,6 @@ SQLite-Datenbank (`spesen.db`) mit folgenden Tabellen:
 - `.env` enthält API-Keys und ist in `.gitignore`
 - Non-root User im Docker-Container
 - Gunicorn mit Request-Limits
-
-## Entwicklung
-
-```bash
-# Mit uv
-uv sync --dev
-uv run pytest
-
-# Ohne uv
-pip install -r requirements.txt
-python -m pytest
-```
 
 ## Lizenz
 
