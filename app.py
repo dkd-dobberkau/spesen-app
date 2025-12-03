@@ -98,6 +98,29 @@ def get_export_dir(monat_str, subfolder=None):
     return export_path
 
 
+def parse_datum(datum_str):
+    """
+    Parst ein Datum-String (z.B. '23.11.2025') und gibt ein datetime-Objekt zurück.
+    Fallback: datetime.min für ungültige Daten (sortiert ans Ende).
+    """
+    if not datum_str:
+        return datetime.min
+
+    # Versuche verschiedene Formate
+    for fmt in ['%d.%m.%Y', '%d.%m.%y', '%Y-%m-%d', '%d/%m/%Y']:
+        try:
+            return datetime.strptime(datum_str.strip(), fmt)
+        except ValueError:
+            continue
+
+    return datetime.min
+
+
+def sort_expenses_by_date(expenses):
+    """Sortiert eine Liste von Expenses nach Datum (aufsteigend)."""
+    return sorted(expenses, key=lambda e: parse_datum(e.get('datum', '')))
+
+
 def get_content_hash(content):
     """Berechnet MD5-Hash des Dateiinhalts für Cache-Key"""
     hasher = hashlib.md5()
@@ -736,8 +759,10 @@ def export_excel():
     
     for cat_key, cat_info in CATEGORIES.items():
         cat_expenses = expenses.get(cat_key, [])
+        # Nach Datum sortieren
+        cat_expenses = sort_expenses_by_date(cat_expenses)
         cat_sum = 0
-        
+
         # Category header
         ws.cell(row=row, column=1, value=f"{list(CATEGORIES.keys()).index(cat_key) + 1}. {cat_info['name']}")
         ws.cell(row=row, column=1).fill = header_fill
@@ -852,7 +877,10 @@ def export_pdf():
         cat_expenses = expenses.get(cat_key, [])
         if not cat_expenses:
             continue
-        
+
+        # Nach Datum sortieren
+        cat_expenses = sort_expenses_by_date(cat_expenses)
+
         cat_sum = 0
         elements.append(Paragraph(cat_info['name'], styles['Heading2']))
         
