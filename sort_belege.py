@@ -7,9 +7,11 @@ Verwendung:
     python sort_belege.py /pfad/zu/belegen --output /pfad/zu/sortiert
     python sort_belege.py /pfad/zu/belegen --dry-run
     python sort_belege.py /pfad/zu/belegen --move  # Verschieben statt Kopieren
+    python sort_belege.py /pfad/zu/belegen --skip-duplicates  # Duplikate überspringen
 """
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -47,11 +49,39 @@ MONAT_KURZ = {
 }
 
 
+def get_file_hash(filepath):
+    """Berechnet MD5-Hash einer Datei"""
+    hasher = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def find_duplicates(files):
+    """Findet Duplikate anhand des MD5-Hashs"""
+    hash_to_files = {}  # {hash: [filepath1, filepath2, ...]}
+
+    for filepath in files:
+        try:
+            file_hash = get_file_hash(filepath)
+            if file_hash not in hash_to_files:
+                hash_to_files[file_hash] = []
+            hash_to_files[file_hash].append(filepath)
+        except Exception as e:
+            print(f"  ⚠️  Hash-Fehler bei {filepath.name}: {e}")
+
+    # Nur Gruppen mit mehr als einer Datei sind Duplikate
+    duplicates = {h: files for h, files in hash_to_files.items() if len(files) > 1}
+
+    return hash_to_files, duplicates
+
+
 def extract_date_from_filename(filename):
     """Versucht ein Datum aus dem Dateinamen zu extrahieren"""
     name = filename.lower()
 
-    # Pattern 1: YYYY-MM-DD oder YYYY_MM_DD
+    # Pattern 1: YYYY-MM-DD oder YYYY_MM_DD oder YYYYMMDD
     match = re.search(r'(20\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])', name)
     if match:
         return int(match.group(1)), int(match.group(2)), int(match.group(3))
@@ -171,11 +201,16 @@ Beispiele:
   python sort_belege.py /Users/olivier/Documents/Scans --dry-run
   python sort_belege.py /Users/olivier/Documents/Scans --move --use-mtime
   python sort_belege.py /Users/olivier/Documents/Scans --recursive
+  python sort_belege.py /Users/olivier/Documents/Scans --skip-duplicates
 
 Datum-Erkennung (Priorität):
   1. Aus Dateinamen (z.B. "2025-11-15_Beleg.pdf", "Rechnung_15.11.2025.jpg")
   2. Aus EXIF-Metadaten (bei Bildern)
   3. Aus Änderungsdatum (mit --use-mtime)
+
+Duplikat-Erkennung:
+  Dateien werden via MD5-Hash verglichen. Identische Dateien werden erkannt,
+  auch wenn sie unterschiedliche Namen haben.
         """
     )
 
@@ -191,6 +226,10 @@ Datum-Erkennung (Priorität):
                         help='Unterordner rekursiv durchsuchen')
     parser.add_argument('--format', '-f', choices=['german', 'short', 'month'],
                         default='german', help='Ordner-Namensformat')
+    parser.add_argument('--skip-duplicates', '-d', action='store_true',
+                        help='Duplikate überspringen (nur erstes behalten)')
+    parser.add_argument('--duplicates-folder', action='store_true',
+                        help='Duplikate in separaten Ordner verschieben')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Ausführliche Ausgabe')
 
@@ -212,13 +251,51 @@ Datum-Erkennung (Priorität):
         print("❌ Keine Belege gefunden (PDF, JPG, PNG, TIFF)")
         sys.exit(1)
 
-    print(f"📄 {len(files)} Dateien gefunden\n")
+    print(f"📄 {len(files)} Dateien gefunden")
 
-    # Dateien analysieren und gruppieren
-    by_month = {}  # {(year, month): [(file, source), ...]}
-    unknown = []
+    # Duplikate erkennen
+    print(f"\n🔍 Prüfe auf Duplikate (MD5-Hash)...")
+    hash_to_files, duplicates = find_duplicates(files)
+
+    # Duplikat-Statistik
+    total_duplicates = sum(len(f) - 1 for f in duplicates.values())
+    unique_files = len(hash_to_files)
+
+    if duplicates:
+        print(f"   {total_duplicates} Duplikate gefunden ({unique_files} einzigartige Dateien)")
+        if args.verbose:
+            print(f"\n📋 Duplikat-Gruppen:")
+            for file_hash, dup_files in duplicates.items():
+                print(f"   Hash {file_hash[:8]}...:")
+                for f in dup_files:
+                    print(f"      - {f.name}")
+    else:
+        print(f"   Keine Duplikate gefunden")
+
+    # Dateien filtern (Duplikate entfernen wenn gewünscht)
+    files_to_process = []
+    skipped_duplicates = []
+    seen_hashes = set()
 
     for filepath in files:
+        try:
+            file_hash = get_file_hash(filepath)
+            if args.skip_duplicates or args.duplicates_folder:
+                if file_hash in seen_hashes:
+                    skipped_duplicates.append(filepath)
+                    continue
+                seen_hashes.add(file_hash)
+            files_to_process.append((filepath, file_hash))
+        except Exception:
+            files_to_process.append((filepath, None))
+
+    print(f"\n{'='*60}")
+
+    # Dateien analysieren und gruppieren
+    by_month = {}  # {(year, month): [(file, source, day, hash), ...]}
+    unknown = []
+
+    for filepath, file_hash in files_to_process:
         date, source = get_date_for_file(filepath, use_mtime=args.use_mtime)
 
         if date:
@@ -226,21 +303,23 @@ Datum-Erkennung (Priorität):
             key = (year, month)
             if key not in by_month:
                 by_month[key] = []
-            by_month[key].append((filepath, source, day))
+            by_month[key].append((filepath, source, day, file_hash))
 
             if args.verbose:
-                print(f"  ✓ {filepath.name} → {MONAT_NAMEN[month]} {year} ({source})")
+                hash_info = f" [{file_hash[:8]}]" if file_hash else ""
+                print(f"  ✓ {filepath.name} → {MONAT_NAMEN[month]} {year} ({source}){hash_info}")
         else:
-            unknown.append(filepath)
+            unknown.append((filepath, file_hash))
             if args.verbose:
                 print(f"  ? {filepath.name} → Datum unbekannt")
 
     # Zusammenfassung
-    print(f"\n{'='*60}")
-    print(f"📊 Zusammenfassung:")
+    print(f"\n📊 Zusammenfassung:")
     print(f"   Erkannt: {sum(len(v) for v in by_month.values())} Dateien in {len(by_month)} Monaten")
     if unknown:
         print(f"   Unbekannt: {len(unknown)} Dateien")
+    if skipped_duplicates:
+        print(f"   Übersprungen (Duplikate): {len(skipped_duplicates)} Dateien")
 
     # Monate anzeigen
     print(f"\n📅 Monate:")
@@ -250,10 +329,17 @@ Datum-Erkennung (Priorität):
 
     if unknown:
         print(f"\n⚠️  Dateien ohne erkanntes Datum:")
-        for f in unknown[:10]:
+        for f, h in unknown[:10]:
             print(f"   - {f.name}")
         if len(unknown) > 10:
             print(f"   ... und {len(unknown) - 10} weitere")
+
+    if skipped_duplicates and args.verbose:
+        print(f"\n🔄 Übersprungene Duplikate:")
+        for f in skipped_duplicates[:10]:
+            print(f"   - {f.name}")
+        if len(skipped_duplicates) > 10:
+            print(f"   ... und {len(skipped_duplicates) - 10} weitere")
 
     # Dry-run Ende
     if args.dry_run:
@@ -274,7 +360,7 @@ Datum-Erkennung (Priorität):
         target_dir = output_dir / folder_name
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        for filepath, source, day in files_list:
+        for filepath, source, day, file_hash in files_list:
             target_path = target_dir / filepath.name
 
             # Bei Namenskonflikt: Nummer anhängen
@@ -304,7 +390,7 @@ Datum-Erkennung (Priorität):
         unsorted_dir = output_dir / '_Unsortiert'
         unsorted_dir.mkdir(parents=True, exist_ok=True)
 
-        for filepath in unknown:
+        for filepath, file_hash in unknown:
             target_path = unsorted_dir / filepath.name
 
             if target_path.exists():
@@ -324,8 +410,37 @@ Datum-Erkennung (Priorität):
             except Exception as e:
                 errors += 1
 
+    # Duplikate in separaten Ordner (wenn gewünscht)
+    if args.duplicates_folder and skipped_duplicates:
+        dup_dir = output_dir / '_Duplikate'
+        dup_dir.mkdir(parents=True, exist_ok=True)
+
+        for filepath in skipped_duplicates:
+            target_path = dup_dir / filepath.name
+
+            if target_path.exists():
+                stem = filepath.stem
+                suffix = filepath.suffix
+                counter = 1
+                while target_path.exists():
+                    target_path = dup_dir / f"{stem}_{counter}{suffix}"
+                    counter += 1
+
+            try:
+                if args.move:
+                    shutil.move(str(filepath), str(target_path))
+                else:
+                    shutil.copy2(str(filepath), str(target_path))
+            except Exception as e:
+                print(f"  ❌ Fehler bei Duplikat {filepath.name}: {e}")
+
     print(f"\n{'='*60}")
     print(f"✅ {copied} Dateien {action}")
+    if skipped_duplicates:
+        if args.duplicates_folder:
+            print(f"🔄 {len(skipped_duplicates)} Duplikate in _Duplikate/ Ordner")
+        else:
+            print(f"🔄 {len(skipped_duplicates)} Duplikate übersprungen")
     if errors:
         print(f"❌ {errors} Fehler")
     print(f"📁 Zielordner: {output_dir}")
