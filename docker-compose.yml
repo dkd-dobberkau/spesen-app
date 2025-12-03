@@ -48,6 +48,7 @@ services:
       - ./logs:/app/logs
       # Beleg-Ordner mounten (anpassen!)
       - ~/Documents/Scans:/data/belege:ro
+      - ~/Desktop/Belege:/data/uber:ro
     environment:
       - PYTHONUNBUFFERED=1
       - GUNICORN_WORKERS=4

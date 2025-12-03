@@ -92,30 +92,30 @@ convert_path_for_docker() {
     fi
 }
 
-# Argumente für Docker anpassen
+# Argumente für Docker anpassen (in-place im globalen Array DOCKER_ARGS)
+declare -a DOCKER_ARGS=()
+
 convert_args_for_docker() {
-    local args=()
+    DOCKER_ARGS=()
     local skip_next=false
 
     for arg in "$@"; do
         if $skip_next; then
             skip_next=false
-            args+=("$(convert_path_for_docker "$arg")")
+            DOCKER_ARGS+=("$(convert_path_for_docker "$arg")")
             continue
         fi
 
         # Pfad-Argumente erkennen
         if [[ "$arg" == /* ]] && [[ -e "$arg" || -d "$arg" ]]; then
-            args+=("$(convert_path_for_docker "$arg")")
+            DOCKER_ARGS+=("$(convert_path_for_docker "$arg")")
         elif [[ "$arg" == "--output" ]] || [[ "$arg" == "-o" ]]; then
-            args+=("$arg")
+            DOCKER_ARGS+=("$arg")
             skip_next=true
         else
-            args+=("$arg")
+            DOCKER_ARGS+=("$arg")
         fi
     done
-
-    echo "${args[@]}"
 }
 
 # CLI im Docker Container ausführen
@@ -138,15 +138,14 @@ run_in_docker() {
     echo -e "${BLUE}🐳 Führe im Docker-Container aus...${NC}"
 
     # Argumente für Docker konvertieren
-    local docker_args
-    docker_args=$(convert_args_for_docker "${args[@]}")
+    convert_args_for_docker "${args[@]}"
 
     case "$cmd" in
         scan)
-            docker compose -f "$COMPOSE_FILE" exec -T app python cli.py $docker_args
+            docker compose -f "$COMPOSE_FILE" exec -T app python cli.py "${DOCKER_ARGS[@]}"
             ;;
         sort)
-            docker compose -f "$COMPOSE_FILE" exec -T app python sort_belege.py $docker_args
+            docker compose -f "$COMPOSE_FILE" exec -T app python sort_belege.py "${DOCKER_ARGS[@]}"
             ;;
         *)
             echo -e "${RED}❌ Unbekannter Befehl: $cmd${NC}"

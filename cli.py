@@ -21,11 +21,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-# Datenbank-Pfad (gleiche wie Web-App)
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'spesen.db')
+# Datenbank-Pfad (gleiche wie Web-App, im data-Verzeichnis für Persistenz)
+DATA_DIR = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
+os.makedirs(DATA_DIR, exist_ok=True)
+DATABASE = os.path.join(DATA_DIR, 'spesen.db')
 
-# Cache-Datei für extrahierte Beleg-Daten
-CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.beleg_cache.json')
+# Cache-Datei für extrahierte Beleg-Daten (im persistenten data-Verzeichnis)
+CACHE_FILE = os.path.join(DATA_DIR, '.beleg_cache.json')
 
 
 def get_file_hash(filepath):
@@ -79,6 +81,134 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+
+# Requests für Währungs-API (optional)
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+
+# ============================================================================
+# Währungsumrechnung
+# ============================================================================
+
+# Fallback-Wechselkurse zu EUR (Stand: Dezember 2024)
+# Diese werden verwendet wenn keine API verfügbar ist
+FALLBACK_EXCHANGE_RATES = {
+    'EUR': 1.0,
+    'USD': 0.95,      # 1 USD = 0.95 EUR
+    'GBP': 1.17,      # 1 GBP = 1.17 EUR
+    'CHF': 1.06,      # 1 CHF = 1.06 EUR
+    'DKK': 0.134,     # 1 DKK = 0.134 EUR (Dänemark, Euro-gebunden)
+    'SEK': 0.088,     # 1 SEK = 0.088 EUR (Schweden)
+    'NOK': 0.085,     # 1 NOK = 0.085 EUR (Norwegen)
+    'PLN': 0.23,      # 1 PLN = 0.23 EUR (Polen)
+    'CZK': 0.040,     # 1 CZK = 0.040 EUR (Tschechien)
+    'HUF': 0.0025,    # 1 HUF = 0.0025 EUR (Ungarn)
+    'RON': 0.20,      # 1 RON = 0.20 EUR (Rumänien)
+    'BGN': 0.51,      # 1 BGN = 0.51 EUR (Bulgarien, Euro-gebunden)
+    'HRK': 0.133,     # 1 HRK = 0.133 EUR (Kroatien, historisch)
+    'JPY': 0.0063,    # 1 JPY = 0.0063 EUR (Japan)
+    'CNY': 0.13,      # 1 CNY = 0.13 EUR (China)
+    'AUD': 0.61,      # 1 AUD = 0.61 EUR (Australien)
+    'CAD': 0.68,      # 1 CAD = 0.68 EUR (Kanada)
+}
+
+# Cache für API-Wechselkurse (wird einmal pro Session geladen)
+_exchange_rates_cache = None
+
+
+def get_exchange_rates():
+    """
+    Holt aktuelle Wechselkurse von der EZB oder verwendet Fallback.
+    Cached das Ergebnis für die gesamte Session.
+    """
+    global _exchange_rates_cache
+
+    if _exchange_rates_cache is not None:
+        return _exchange_rates_cache
+
+    # Versuche EZB-Kurse zu laden (kostenlos, kein API-Key nötig)
+    if REQUESTS_AVAILABLE:
+        try:
+            # EZB Exchange Rates API (XML)
+            response = requests.get(
+                'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml',
+                timeout=5
+            )
+            if response.status_code == 200:
+                import re
+                rates = {'EUR': 1.0}
+                # Parse XML einfach mit Regex (schneller als XML-Parser)
+                for match in re.finditer(r"currency='(\w+)' rate='([\d.]+)'", response.text):
+                    currency, rate = match.groups()
+                    # EZB gibt EUR zu Fremdwährung, wir brauchen Fremdwährung zu EUR
+                    rates[currency] = 1.0 / float(rate)
+
+                if len(rates) > 5:  # Sanity check
+                    print(f"💱 Aktuelle EZB-Wechselkurse geladen ({len(rates)} Währungen)")
+                    _exchange_rates_cache = rates
+                    return rates
+        except Exception as e:
+            print(f"⚠️  EZB-Kurse nicht verfügbar: {e}")
+
+    # Fallback verwenden
+    print("💱 Verwende Fallback-Wechselkurse")
+    _exchange_rates_cache = FALLBACK_EXCHANGE_RATES.copy()
+    return _exchange_rates_cache
+
+
+def convert_to_eur(amount, currency):
+    """
+    Konvertiert einen Betrag von einer Fremdwährung nach EUR.
+
+    Returns:
+        tuple: (betrag_eur, original_string) oder (amount, None) wenn bereits EUR
+    """
+    if not currency or currency.upper() == 'EUR':
+        return amount, None
+
+    currency = currency.upper()
+    rates = get_exchange_rates()
+
+    if currency in rates:
+        rate = rates[currency]
+        amount_eur = round(amount * rate, 2)
+        original_str = f"{amount:.2f} {currency}"
+        return amount_eur, original_str
+    else:
+        print(f"⚠️  Unbekannte Währung: {currency} - keine Umrechnung")
+        return amount, None
+
+
+def process_currency_conversion(expense_data):
+    """
+    Verarbeitet einen Expense-Eintrag und konvertiert Fremdwährungen nach EUR.
+    Modifiziert das Dict in-place und fügt Original-Währungsinfo zur Beschreibung hinzu.
+    """
+    betrag = expense_data.get('betrag', 0)
+    waehrung = expense_data.get('waehrung', 'EUR')
+
+    if not betrag or not waehrung:
+        return expense_data
+
+    betrag_eur, original_str = convert_to_eur(float(betrag), waehrung)
+
+    if original_str:
+        # Fremdwährung wurde konvertiert
+        expense_data['betrag'] = betrag_eur
+        expense_data['betrag_original'] = original_str
+        expense_data['waehrung_original'] = waehrung
+        expense_data['waehrung'] = 'EUR'
+
+        # Original-Währung in Beschreibung einfügen
+        beschreibung = expense_data.get('beschreibung', '')
+        if beschreibung and original_str not in beschreibung:
+            expense_data['beschreibung'] = f"{beschreibung} ({original_str})"
+
+    return expense_data
 
 
 CATEGORIES = {
@@ -346,7 +476,7 @@ def get_db():
 
 
 def save_to_database(expenses, meta):
-    """Speichert die Abrechnung in der SQLite-Datenbank"""
+    """Speichert die Abrechnung in der SQLite-Datenbank (fügt hinzu, überschreibt nicht)"""
     with get_db() as conn:
         # Prüfen ob Abrechnung für diesen Namen+Monat existiert
         existing = conn.execute(
@@ -356,13 +486,12 @@ def save_to_database(expenses, meta):
 
         if existing:
             abrechnung_id = existing['id']
-            # Update existierende Abrechnung
+            # Update existierende Abrechnung (Datum aktualisieren)
             conn.execute('''
                 UPDATE abrechnungen SET datum=?, updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
             ''', (meta.get('datum'), abrechnung_id))
-            # Alte Ausgaben löschen
-            conn.execute('DELETE FROM ausgaben WHERE abrechnung_id = ?', (abrechnung_id,))
+            # NICHT mehr löschen - neue Belege werden hinzugefügt!
         else:
             # Neue Abrechnung erstellen
             cursor = conn.execute('''
@@ -557,8 +686,8 @@ Beispiele:
     parser.add_argument('--output', '-o', help='Ausgabedatei (Standard: spesen_DATUM.xlsx)')
     parser.add_argument('--format', '-f', choices=['excel', 'pdf', 'both', 'json'],
                         default='both', help='Ausgabeformat (Standard: both)')
-    parser.add_argument('--save-db', '-s', action='store_true',
-                        help='In Datenbank speichern (für Web-App sichtbar)')
+    parser.add_argument('--no-db', action='store_true',
+                        help='NICHT in Datenbank speichern (Standard: speichert in DB)')
     parser.add_argument('--no-cache', action='store_true',
                         help='Cache ignorieren und alle Belege neu verarbeiten')
     parser.add_argument('--verbose', '-v', action='store_true', help='Ausführliche Ausgabe')
@@ -605,12 +734,24 @@ Beispiele:
         data, error = process_receipt(filepath, client, cache=cache, use_cache=use_cache)
 
         if data:
-            expenses.append(data)
             is_cached = data.pop('_cached', False)
             cache_indicator = " 📦" if is_cached else ""
             if is_cached:
                 cached_count += 1
-            print(f"✅ {data.get('betrag', '?')} {data.get('waehrung', 'EUR')} - {data.get('kategorie', '?')}{cache_indicator}")
+
+            # Original-Währung für Anzeige merken
+            original_waehrung = data.get('waehrung', 'EUR')
+            original_betrag = data.get('betrag', 0)
+
+            # Fremdwährung nach EUR konvertieren
+            if original_waehrung and original_waehrung.upper() != 'EUR':
+                process_currency_conversion(data)
+                conversion_indicator = f" → {data.get('betrag', '?')} EUR"
+            else:
+                conversion_indicator = ""
+
+            expenses.append(data)
+            print(f"✅ {original_betrag} {original_waehrung} - {data.get('kategorie', '?')}{conversion_indicator}{cache_indicator}")
             if args.verbose:
                 print(f"         → {data.get('beschreibung', '')} ({data.get('anbieter', '')})")
         else:
@@ -645,8 +786,8 @@ Beispiele:
     total = sum(float(e.get('betrag', 0) or 0) for e in expenses)
     print(f"\n💰 Gesamtsumme: {total:.2f} EUR")
 
-    # In Datenbank speichern wenn gewünscht
-    if args.save_db:
+    # In Datenbank speichern (Standard: ja, außer --no-db)
+    if not args.no_db:
         try:
             abrechnung_id = save_to_database(expenses, meta)
             print(f"\n💾 In Datenbank gespeichert (ID: {abrechnung_id})")

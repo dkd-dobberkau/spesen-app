@@ -96,7 +96,7 @@ def decrypt_data(encrypted_data):
         return None
     return cipher.decrypt(encrypted_data.encode()).decode()
 
-DATABASE = 'spesen.db'
+DATABASE = os.path.join(DATA_DIR, 'spesen.db')
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
