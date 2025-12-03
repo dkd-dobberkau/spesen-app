@@ -649,6 +649,10 @@ def get_abrechnung(abrechnung_id):
             if row['kategorie'] in expenses:
                 expenses[row['kategorie']].append(json.loads(row['daten']))
 
+        # Jede Kategorie nach Datum sortieren
+        for cat in expenses:
+            expenses[cat] = sort_expenses_by_date(expenses[cat])
+
         return jsonify({
             'meta': {
                 'id': abr['id'],
