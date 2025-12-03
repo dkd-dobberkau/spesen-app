@@ -620,6 +620,26 @@
         </div>
     </div>
 
+    <!-- Beleg-Viewer Modal -->
+    <div id="beleg-viewer-modal" class="modal modal-fixed-footer" style="width: 90%; max-width: 1200px; height: 90%;">
+        <div class="modal-content" style="padding: 10px; height: calc(100% - 56px);">
+            <div id="beleg-viewer-container" style="width: 100%; height: 100%; display: flex; flex-direction: column;">
+                <div id="beleg-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h5 style="margin: 0;"><i class="material-icons left">attach_file</i><span id="beleg-viewer-title">Beleg</span></h5>
+                    <a href="#!" id="beleg-download-btn" class="btn-small waves-effect waves-light" download>
+                        <i class="material-icons left">download</i>Download
+                    </a>
+                </div>
+                <div id="beleg-viewer-content" style="flex: 1; overflow: auto; background: #f5f5f5; border-radius: 4px;">
+                    <!-- PDF/Bild wird hier angezeigt -->
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Schließen</a>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
         // Bewirtungsbeleg-Index für aktuellen Eintrag
@@ -744,11 +764,17 @@
                     ? `<i class="material-icons delete-btn" onclick="generateBewirtungsbeleg(${index})" style="margin-right: 10px;" title="Bewirtungsbeleg erstellen">receipt_long</i>`
                     : '';
 
+                // Beleg-Anzeige Button (nur wenn file_hash vorhanden)
+                const belegBtn = exp.file_hash
+                    ? `<i class="material-icons delete-btn" onclick="showBeleg('${exp.file_hash}')" style="margin-right: 10px;" title="Beleg anzeigen">attach_file</i>`
+                    : '';
+
                 html += `
                     <div class="expense-item row valign-wrapper" style="margin-bottom: 5px;">
                         <div class="col s6 m7">${details}</div>
                         <div class="col s3 m2 right-align"><strong>${betrag.toFixed(2)} €</strong></div>
                         <div class="col s3 m3 right-align">
+                            ${belegBtn}
                             ${bewirtungBtn}
                             <i class="material-icons delete-btn" onclick="editExpense('${category}', ${index})" style="margin-right: 10px;" title="Bearbeiten">edit</i>
                             <i class="material-icons delete-btn" onclick="deleteExpense('${category}', ${index})" title="Löschen">delete</i>
@@ -1469,7 +1495,7 @@
             monat: 'Monat',
             beschreibung: 'Beschreibung',
             betrag: 'Betrag €',
-            personen: 'Bewirtete Personen',
+            personen: 'Restaurant / Ort',
             typ: 'Typ',
             ort: 'Ort / Beschreibung'
         };
@@ -1741,6 +1767,52 @@
             modal.close();
 
             M.toast({html: 'Beleg hinzugefügt', classes: 'rounded green'});
+        }
+
+        // Beleg-Viewer Funktionen
+        function showBeleg(fileHash) {
+            const viewerContent = document.getElementById('beleg-viewer-content');
+            const downloadBtn = document.getElementById('beleg-download-btn');
+            const titleEl = document.getElementById('beleg-viewer-title');
+
+            // Loading-Anzeige
+            viewerContent.innerHTML = '<div class="center-align" style="padding: 50px;"><div class="preloader-wrapper active"><div class="spinner-layer spinner-blue-only"><div class="circle-clipper left"><div class="circle"></div></div><div class="gap-patch"><div class="circle"></div></div><div class="circle-clipper right"><div class="circle"></div></div></div></div><p>Lade Beleg...</p></div>';
+
+            // Modal öffnen
+            const modal = M.Modal.getInstance(document.getElementById('beleg-viewer-modal'));
+            modal.open();
+
+            // Erst Info laden um Dateiname zu bekommen
+            fetch(`/api/beleg/${fileHash}/info`)
+            .then(response => response.json())
+            .then(info => {
+                const dateiName = info.datei || 'Beleg';
+                titleEl.textContent = dateiName;
+
+                // Download-Link setzen
+                downloadBtn.href = `/api/beleg/${fileHash}`;
+                downloadBtn.download = dateiName;
+
+                // Beleg laden und anzeigen
+                const belegUrl = `/api/beleg/${fileHash}`;
+
+                // Dateityp bestimmen
+                const ext = dateiName.split('.').pop().toLowerCase();
+
+                if (ext === 'pdf') {
+                    // PDF in iframe anzeigen
+                    viewerContent.innerHTML = `<iframe src="${belegUrl}" style="width: 100%; height: 100%; border: none;"></iframe>`;
+                } else if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'].includes(ext)) {
+                    // Bild anzeigen
+                    viewerContent.innerHTML = `<div style="text-align: center; padding: 20px;"><img src="${belegUrl}" style="max-width: 100%; max-height: 100%; object-fit: contain;"></div>`;
+                } else {
+                    // Unbekannter Typ - Download-Link anbieten
+                    viewerContent.innerHTML = `<div class="center-align" style="padding: 50px;"><p>Vorschau nicht verfügbar</p><a href="${belegUrl}" class="btn" download="${dateiName}"><i class="material-icons left">download</i>Herunterladen</a></div>`;
+                }
+            })
+            .catch(err => {
+                viewerContent.innerHTML = `<div class="center-align" style="padding: 50px;"><i class="material-icons" style="font-size: 48px; color: #999;">error</i><p class="red-text">Beleg nicht gefunden</p><p class="grey-text">${err.message || 'Unbekannter Fehler'}</p></div>`;
+            });
         }
     </script>
 </body>

@@ -475,10 +475,14 @@ Beleg-Text:
         data = json.loads(response_text)
         data['datei'] = os.path.basename(filepath)
 
-        # In Cache speichern (ohne datei-Feld, das wird beim Laden gesetzt)
+        # File-Hash berechnen und mit speichern (für Beleg-Lookup)
+        file_hash = get_file_hash(filepath)
+        data['file_hash'] = file_hash
+
+        # In Cache speichern (mit vollständigem Pfad für späteren Zugriff)
         if cache is not None:
-            file_hash = get_file_hash(filepath)
             cache_data = {k: v for k, v in data.items() if k != 'datei'}
+            cache_data['datei_pfad'] = str(filepath)  # Vollständiger Pfad
             cache[file_hash] = cache_data
 
         return data, None
@@ -715,6 +719,10 @@ def save_to_database(expenses, meta):
                     'beschreibung': f"{exp.get('beschreibung', '')} ({exp.get('anbieter', '')})",
                     'betrag': exp.get('betrag', 0)
                 }
+
+            # File-Hash für Beleg-Lookup hinzufügen (falls vorhanden)
+            if exp.get('file_hash'):
+                daten['file_hash'] = exp.get('file_hash')
 
             conn.execute('''
                 INSERT INTO ausgaben (abrechnung_id, kategorie, daten)

@@ -621,6 +621,79 @@ def delete_person(person_id):
         conn.commit()
         return jsonify({'success': True})
 
+# API: Beleg per Hash abrufen
+@app.route('/api/beleg/<file_hash>', methods=['GET'])
+def get_beleg(file_hash):
+    """Gibt den Beleg (PDF/Bild) per file_hash zurück."""
+    import os
+    from flask import send_file
+
+    # Cache laden
+    cache = {}
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            cache = json.load(f)
+
+    if file_hash not in cache:
+        return jsonify({'error': 'Beleg nicht im Cache gefunden'}), 404
+
+    cache_entry = cache[file_hash]
+    datei_pfad = cache_entry.get('datei_pfad')
+
+    if not datei_pfad or not os.path.exists(datei_pfad):
+        # Fallback: Dateiname in bekannten Ordnern suchen
+        datei_name = cache_entry.get('datei')
+        if datei_name:
+            # Bekannte Beleg-Ordner (aus docker-compose)
+            search_dirs = [
+                '/data/belege',
+                '/data/uber',
+                os.path.expanduser('~/Documents/Scans'),
+                os.path.expanduser('~/Desktop/Belege'),
+                os.path.join(os.path.dirname(__file__), 'belege', 'archiv')
+            ]
+            for search_dir in search_dirs:
+                if os.path.exists(search_dir):
+                    for root, dirs, files in os.walk(search_dir):
+                        if datei_name in files:
+                            datei_pfad = os.path.join(root, datei_name)
+                            break
+                    if datei_pfad and os.path.exists(datei_pfad):
+                        break
+
+    if not datei_pfad or not os.path.exists(datei_pfad):
+        return jsonify({'error': 'Beleg-Datei nicht gefunden', 'datei': cache_entry.get('datei')}), 404
+
+    # MIME-Type bestimmen
+    ext = os.path.splitext(datei_pfad)[1].lower()
+    mime_types = {
+        '.pdf': 'application/pdf',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.tiff': 'image/tiff',
+        '.bmp': 'image/bmp',
+        '.gif': 'image/gif'
+    }
+    mime_type = mime_types.get(ext, 'application/octet-stream')
+
+    return send_file(datei_pfad, mimetype=mime_type)
+
+# API: Beleg-Info per Hash abrufen (ohne Datei)
+@app.route('/api/beleg/<file_hash>/info', methods=['GET'])
+def get_beleg_info(file_hash):
+    """Gibt die Cache-Informationen zum Beleg zurück."""
+    # Cache laden
+    cache = {}
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            cache = json.load(f)
+
+    if file_hash not in cache:
+        return jsonify({'error': 'Beleg nicht im Cache gefunden'}), 404
+
+    return jsonify(cache[file_hash])
+
 # API: Liste aller Abrechnungen
 @app.route('/api/abrechnungen', methods=['GET'])
 def list_abrechnungen():
