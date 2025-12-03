@@ -6,6 +6,8 @@
     <title>Spesenabrechnung - Olivier Dobberkau</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
+    <!-- PDF.js für PDF-Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         :root { --primary-color: #333333; }
         .nav-wrapper, .btn, .btn-floating { background-color: var(--primary-color) !important; }
@@ -621,17 +623,55 @@
     </div>
 
     <!-- Beleg-Viewer Modal -->
-    <div id="beleg-viewer-modal" class="modal modal-fixed-footer" style="width: 90%; max-width: 1200px; height: 90%;">
+    <div id="beleg-viewer-modal" class="modal modal-fixed-footer" style="width: 95%; max-width: 1200px; height: 90%;">
         <div class="modal-content" style="padding: 10px; height: calc(100% - 56px);">
             <div id="beleg-viewer-container" style="width: 100%; height: 100%; display: flex; flex-direction: column;">
-                <div id="beleg-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h5 style="margin: 0;"><i class="material-icons left">attach_file</i><span id="beleg-viewer-title">Beleg</span></h5>
-                    <a href="#!" id="beleg-download-btn" class="btn-small waves-effect waves-light" download>
+                <div id="beleg-viewer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                    <h5 style="margin: 0; flex: 1; min-width: 200px;"><i class="material-icons left">attach_file</i><span id="beleg-viewer-title">Beleg</span></h5>
+                    <div id="pdf-controls" style="display: none; align-items: center; gap: 10px;">
+                        <button class="btn-small waves-effect waves-light" onclick="pdfPrevPage()" title="Vorherige Seite">
+                            <i class="material-icons">chevron_left</i>
+                        </button>
+                        <span id="pdf-page-info" style="min-width: 80px; text-align: center;">1 / 1</span>
+                        <button class="btn-small waves-effect waves-light" onclick="pdfNextPage()" title="Nächste Seite">
+                            <i class="material-icons">chevron_right</i>
+                        </button>
+                        <button class="btn-small waves-effect waves-light" onclick="pdfZoomOut()" title="Verkleinern">
+                            <i class="material-icons">zoom_out</i>
+                        </button>
+                        <span id="pdf-zoom-info" style="min-width: 50px; text-align: center;">100%</span>
+                        <button class="btn-small waves-effect waves-light" onclick="pdfZoomIn()" title="Vergrößern">
+                            <i class="material-icons">zoom_in</i>
+                        </button>
+                        <button class="btn-small waves-effect waves-light" onclick="pdfFitWidth()" title="An Breite anpassen">
+                            <i class="material-icons">fit_screen</i>
+                        </button>
+                    </div>
+                    <a href="#!" id="beleg-download-btn" class="btn-small waves-effect waves-light green" download>
                         <i class="material-icons left">download</i>Download
                     </a>
                 </div>
-                <div id="beleg-viewer-content" style="flex: 1; overflow: auto; background: #f5f5f5; border-radius: 4px;">
+                <div id="beleg-viewer-content" style="flex: 1; overflow: auto; background: #e0e0e0; border-radius: 4px; display: flex; justify-content: center; align-items: flex-start; padding: 10px;">
                     <!-- PDF/Bild wird hier angezeigt -->
+                    <canvas id="pdf-canvas" style="display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3); background: white;"></canvas>
+                    <div id="image-container" style="display: none; text-align: center;">
+                        <img id="beleg-image" style="max-width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,0.3);">
+                    </div>
+                    <div id="beleg-loading" style="display: none; text-align: center; padding: 50px;">
+                        <div class="preloader-wrapper active">
+                            <div class="spinner-layer spinner-blue-only">
+                                <div class="circle-clipper left"><div class="circle"></div></div>
+                                <div class="gap-patch"><div class="circle"></div></div>
+                                <div class="circle-clipper right"><div class="circle"></div></div>
+                            </div>
+                        </div>
+                        <p>Lade Beleg...</p>
+                    </div>
+                    <div id="beleg-error" style="display: none; text-align: center; padding: 50px;">
+                        <i class="material-icons" style="font-size: 48px; color: #999;">error</i>
+                        <p class="red-text">Beleg nicht gefunden</p>
+                        <p class="grey-text" id="beleg-error-msg"></p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1769,50 +1809,186 @@
             M.toast({html: 'Beleg hinzugefügt', classes: 'rounded green'});
         }
 
-        // Beleg-Viewer Funktionen
+        // ===== PDF.js Viewer =====
+        // PDF.js Worker konfigurieren
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // PDF Viewer State
+        let pdfDoc = null;
+        let pdfPageNum = 1;
+        let pdfPageCount = 0;
+        let pdfScale = 1.0;
+        let pdfRendering = false;
+        let pdfPendingPage = null;
+
         function showBeleg(fileHash) {
-            const viewerContent = document.getElementById('beleg-viewer-content');
             const downloadBtn = document.getElementById('beleg-download-btn');
             const titleEl = document.getElementById('beleg-viewer-title');
+            const pdfControls = document.getElementById('pdf-controls');
+            const pdfCanvas = document.getElementById('pdf-canvas');
+            const imageContainer = document.getElementById('image-container');
+            const belegImage = document.getElementById('beleg-image');
+            const loadingEl = document.getElementById('beleg-loading');
+            const errorEl = document.getElementById('beleg-error');
 
-            // Loading-Anzeige
-            viewerContent.innerHTML = '<div class="center-align" style="padding: 50px;"><div class="preloader-wrapper active"><div class="spinner-layer spinner-blue-only"><div class="circle-clipper left"><div class="circle"></div></div><div class="gap-patch"><div class="circle"></div></div><div class="circle-clipper right"><div class="circle"></div></div></div></div><p>Lade Beleg...</p></div>';
+            // Reset state
+            pdfDoc = null;
+            pdfPageNum = 1;
+            pdfScale = 1.0;
+
+            // Hide all, show loading
+            pdfCanvas.style.display = 'none';
+            imageContainer.style.display = 'none';
+            errorEl.style.display = 'none';
+            pdfControls.style.display = 'none';
+            loadingEl.style.display = 'block';
 
             // Modal öffnen
             const modal = M.Modal.getInstance(document.getElementById('beleg-viewer-modal'));
             modal.open();
 
-            // Erst Info laden um Dateiname zu bekommen
+            // Info laden
             fetch(`/api/beleg/${fileHash}/info`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) throw new Error('Beleg-Info nicht gefunden');
+                return response.json();
+            })
             .then(info => {
                 const dateiName = info.datei || 'Beleg';
                 titleEl.textContent = dateiName;
 
                 // Download-Link setzen
-                downloadBtn.href = `/api/beleg/${fileHash}`;
-                downloadBtn.download = dateiName;
-
-                // Beleg laden und anzeigen
                 const belegUrl = `/api/beleg/${fileHash}`;
+                downloadBtn.href = belegUrl;
+                downloadBtn.download = dateiName;
 
                 // Dateityp bestimmen
                 const ext = dateiName.split('.').pop().toLowerCase();
 
                 if (ext === 'pdf') {
-                    // PDF in iframe anzeigen
-                    viewerContent.innerHTML = `<iframe src="${belegUrl}" style="width: 100%; height: 100%; border: none;"></iframe>`;
+                    // PDF mit PDF.js laden
+                    loadPdf(belegUrl);
                 } else if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'].includes(ext)) {
                     // Bild anzeigen
-                    viewerContent.innerHTML = `<div style="text-align: center; padding: 20px;"><img src="${belegUrl}" style="max-width: 100%; max-height: 100%; object-fit: contain;"></div>`;
+                    loadingEl.style.display = 'none';
+                    imageContainer.style.display = 'block';
+                    belegImage.src = belegUrl;
+                    belegImage.onload = () => {
+                        // Optional: Zoom für Bilder
+                    };
+                    belegImage.onerror = () => {
+                        imageContainer.style.display = 'none';
+                        showBelegError('Bild konnte nicht geladen werden');
+                    };
                 } else {
-                    // Unbekannter Typ - Download-Link anbieten
-                    viewerContent.innerHTML = `<div class="center-align" style="padding: 50px;"><p>Vorschau nicht verfügbar</p><a href="${belegUrl}" class="btn" download="${dateiName}"><i class="material-icons left">download</i>Herunterladen</a></div>`;
+                    loadingEl.style.display = 'none';
+                    showBelegError('Vorschau für diesen Dateityp nicht verfügbar');
                 }
             })
             .catch(err => {
-                viewerContent.innerHTML = `<div class="center-align" style="padding: 50px;"><i class="material-icons" style="font-size: 48px; color: #999;">error</i><p class="red-text">Beleg nicht gefunden</p><p class="grey-text">${err.message || 'Unbekannter Fehler'}</p></div>`;
+                loadingEl.style.display = 'none';
+                showBelegError(err.message || 'Unbekannter Fehler');
             });
+        }
+
+        function loadPdf(url) {
+            const loadingTask = pdfjsLib.getDocument(url);
+            loadingTask.promise.then(pdf => {
+                pdfDoc = pdf;
+                pdfPageCount = pdf.numPages;
+                pdfPageNum = 1;
+
+                // Controls anzeigen
+                document.getElementById('beleg-loading').style.display = 'none';
+                document.getElementById('pdf-controls').style.display = 'flex';
+                document.getElementById('pdf-canvas').style.display = 'block';
+
+                updatePageInfo();
+
+                // Erste Seite rendern mit automatischer Breitenanpassung
+                pdfFitWidth();
+            }).catch(err => {
+                document.getElementById('beleg-loading').style.display = 'none';
+                showBelegError('PDF konnte nicht geladen werden: ' + err.message);
+            });
+        }
+
+        function renderPdfPage(num) {
+            if (pdfRendering) {
+                pdfPendingPage = num;
+                return;
+            }
+            pdfRendering = true;
+
+            pdfDoc.getPage(num).then(page => {
+                const canvas = document.getElementById('pdf-canvas');
+                const ctx = canvas.getContext('2d');
+                const viewport = page.getViewport({ scale: pdfScale });
+
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+
+                const renderContext = {
+                    canvasContext: ctx,
+                    viewport: viewport
+                };
+
+                page.render(renderContext).promise.then(() => {
+                    pdfRendering = false;
+                    if (pdfPendingPage !== null) {
+                        renderPdfPage(pdfPendingPage);
+                        pdfPendingPage = null;
+                    }
+                });
+            });
+
+            updatePageInfo();
+        }
+
+        function updatePageInfo() {
+            document.getElementById('pdf-page-info').textContent = `${pdfPageNum} / ${pdfPageCount}`;
+            document.getElementById('pdf-zoom-info').textContent = `${Math.round(pdfScale * 100)}%`;
+        }
+
+        function pdfPrevPage() {
+            if (pdfPageNum <= 1) return;
+            pdfPageNum--;
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfNextPage() {
+            if (pdfPageNum >= pdfPageCount) return;
+            pdfPageNum++;
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfZoomIn() {
+            pdfScale = Math.min(pdfScale + 0.25, 4.0);
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfZoomOut() {
+            pdfScale = Math.max(pdfScale - 0.25, 0.25);
+            renderPdfPage(pdfPageNum);
+        }
+
+        function pdfFitWidth() {
+            if (!pdfDoc) return;
+
+            pdfDoc.getPage(pdfPageNum).then(page => {
+                const container = document.getElementById('beleg-viewer-content');
+                const containerWidth = container.clientWidth - 40; // Padding abziehen
+
+                const viewport = page.getViewport({ scale: 1.0 });
+                pdfScale = containerWidth / viewport.width;
+
+                renderPdfPage(pdfPageNum);
+            });
+        }
+
+        function showBelegError(message) {
+            document.getElementById('beleg-error').style.display = 'block';
+            document.getElementById('beleg-error-msg').textContent = message;
         }
     </script>
 </body>
