@@ -211,6 +211,73 @@ def process_currency_conversion(expense_data):
     return expense_data
 
 
+# ============================================================================
+# Export-Verzeichnis-Struktur
+# ============================================================================
+
+# Deutsche Monatsnamen
+MONAT_NAMEN = {
+    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April',
+    5: 'Mai', 6: 'Juni', 7: 'Juli', 8: 'August',
+    9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
+}
+
+# Monat-Kurzformen für Parsing
+MONAT_KURZ = {
+    'jan': 1, 'feb': 2, 'mär': 3, 'mar': 3, 'apr': 4,
+    'mai': 5, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+    'sep': 9, 'okt': 10, 'oct': 10, 'nov': 11, 'dez': 12, 'dec': 12
+}
+
+# Export-Basisverzeichnis
+EXPORTS_DIR = os.environ.get('EXPORTS_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'exports'))
+
+
+def parse_monat_string(monat_str):
+    """
+    Parst einen Monat-String (z.B. 'Nov 2025', 'November 2025', '11/2025')
+    und gibt (Jahr, Monat) zurück.
+    """
+    if not monat_str:
+        now = datetime.now()
+        return now.year, now.month
+
+    monat_str = monat_str.lower().strip()
+
+    # Pattern 1: "Nov 2025" oder "November 2025"
+    for kurz, num in MONAT_KURZ.items():
+        if kurz in monat_str:
+            # Jahr extrahieren
+            import re
+            year_match = re.search(r'(20\d{2})', monat_str)
+            if year_match:
+                return int(year_match.group(1)), num
+
+    # Pattern 2: "11/2025" oder "11-2025" oder "11.2025"
+    import re
+    match = re.search(r'(\d{1,2})[/\-.]?(20\d{2})', monat_str)
+    if match:
+        return int(match.group(2)), int(match.group(1))
+
+    # Fallback: aktueller Monat
+    now = datetime.now()
+    return now.year, now.month
+
+
+def get_export_dir(monat_str):
+    """
+    Erstellt den Export-Pfad im Format: exports/2025/11_November/
+    Gibt den Pfad zurück und erstellt das Verzeichnis falls nötig.
+    """
+    year, month = parse_monat_string(monat_str)
+    month_name = MONAT_NAMEN.get(month, f'{month:02d}')
+
+    export_path = os.path.join(EXPORTS_DIR, str(year), f'{month:02d}_{month_name}')
+    os.makedirs(export_path, exist_ok=True)
+
+    return export_path
+
+
 CATEGORIES = {
     'fahrtkosten_kfz': 'Fahrtkosten mit priv. Kfz.',
     'fahrtkosten_pauschale': 'Fahrtkostenpauschale',
@@ -795,9 +862,17 @@ Beispiele:
         except Exception as e:
             print(f"\n⚠️  Datenbank-Fehler: {e}")
 
-    # Export
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    base_output = args.output or f"spesen_{timestamp}"
+    # Export - organisiert nach Jahr/Monat
+    export_dir = get_export_dir(meta.get('monat', ''))
+    monat_safe = meta.get('monat', 'Export').replace(' ', '_').replace('/', '-')
+
+    # Dateinamen: Spesen_Nov_2025.xlsx
+    if args.output:
+        # Benutzer hat eigenen Pfad angegeben
+        base_output = args.output
+    else:
+        # Automatischer Pfad: exports/2025/11_November/Spesen_Nov_2025
+        base_output = os.path.join(export_dir, f"Spesen_{monat_safe}")
 
     if args.format in ('excel', 'both'):
         excel_path = base_output if base_output.endswith('.xlsx') else f"{base_output}.xlsx"

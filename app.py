@@ -39,8 +39,63 @@ app = Flask(__name__)
 DATA_DIR = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(__file__), 'data'))
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# Export directory (Jahr/Monat Struktur)
+EXPORTS_DIR = os.environ.get('EXPORTS_DIR', os.path.join(os.path.dirname(__file__), 'exports'))
+
 # Cache file for parsed receipts (same format as CLI)
 CACHE_FILE = os.path.join(DATA_DIR, '.beleg_cache.json')
+
+# Deutsche Monatsnamen für Export-Ordner
+MONAT_NAMEN = {
+    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April',
+    5: 'Mai', 6: 'Juni', 7: 'Juli', 8: 'August',
+    9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
+}
+
+# Monat-Kurzformen für Parsing
+MONAT_KURZ = {
+    'jan': 1, 'feb': 2, 'mär': 3, 'mar': 3, 'apr': 4,
+    'mai': 5, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+    'sep': 9, 'okt': 10, 'oct': 10, 'nov': 11, 'dez': 12, 'dec': 12
+}
+
+
+def parse_monat_string(monat_str):
+    """Parst einen Monat-String und gibt (Jahr, Monat) zurück."""
+    if not monat_str:
+        now = datetime.now()
+        return now.year, now.month
+
+    monat_str = monat_str.lower().strip()
+
+    # Pattern 1: "Nov 2025" oder "November 2025"
+    for kurz, num in MONAT_KURZ.items():
+        if kurz in monat_str:
+            year_match = re.search(r'(20\d{2})', monat_str)
+            if year_match:
+                return int(year_match.group(1)), num
+
+    # Pattern 2: "11/2025" oder "11-2025"
+    match = re.search(r'(\d{1,2})[/\-.]?(20\d{2})', monat_str)
+    if match:
+        return int(match.group(2)), int(match.group(1))
+
+    now = datetime.now()
+    return now.year, now.month
+
+
+def get_export_dir(monat_str, subfolder=None):
+    """Erstellt Export-Pfad: exports/2025/11_November/ (optional mit Unterordner)"""
+    year, month = parse_monat_string(monat_str)
+    month_name = MONAT_NAMEN.get(month, f'{month:02d}')
+
+    if subfolder:
+        export_path = os.path.join(EXPORTS_DIR, str(year), f'{month:02d}_{month_name}', subfolder)
+    else:
+        export_path = os.path.join(EXPORTS_DIR, str(year), f'{month:02d}_{month_name}')
+
+    os.makedirs(export_path, exist_ok=True)
+    return export_path
 
 
 def get_content_hash(content):
@@ -1119,11 +1174,8 @@ def export_bewirtungsbeleg():
 
     filename = f"{iso_datum}_{safe_restaurant}_Bewirtungsbeleg.pdf"
 
-    # Ordner für Kostenerstattung erstellen (im data-Verzeichnis)
-    safe_monat = re.sub(r'[^\w\s-]', '', monat).strip()
-    safe_monat = re.sub(r'\s+', '_', safe_monat)
-    bewirtungsbelege_dir = os.path.join(DATA_DIR, 'bewirtungsbelege', safe_monat)
-    os.makedirs(bewirtungsbelege_dir, exist_ok=True)
+    # Ordner für Kostenerstattung erstellen (exports/Jahr/Monat/bewirtungsbelege/)
+    bewirtungsbelege_dir = get_export_dir(monat, subfolder='bewirtungsbelege')
 
     # PDF in Ordner speichern
     filepath = os.path.join(bewirtungsbelege_dir, filename)
