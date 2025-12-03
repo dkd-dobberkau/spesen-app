@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+
+# Environment
+.env
+
+# Database & Cache (werden als Volume gemountet)
+*.db
+.beleg_cache.json
+
+# Secrets
+secret.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Exports (werden als Volume gemountet)
+*.xlsx
+*.pdf
+exports/
+
+# Docs
+README.md
