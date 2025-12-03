@@ -1290,5 +1290,139 @@ def export_bewirtungsbeleg():
     output.seek(0)
     return send_file(output, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
+@app.route('/export/zip', methods=['POST'])
+def export_zip():
+    """Exportiert alles in ein ZIP: Excel, PDF und alle Belege."""
+    import zipfile
+
+    data = request.json
+    meta = data.get('meta', {})
+    expenses = data.get('expenses', {})
+    monat = meta.get('monat', 'Spesen')
+
+    # ZIP-Buffer erstellen
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 1. Excel exportieren
+        excel_buffer = io.BytesIO()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = monat
+
+        # Styles
+        header_font = Font(bold=True, color='FFFFFF')
+        header_fill = PatternFill('solid', fgColor='333333')
+        title_font = Font(color='333333', size=14, bold=True)
+
+        # Header
+        ws['A1'] = monat
+        ws['A1'].font = title_font
+        ws['C1'] = meta.get('name', '')
+        ws['C1'].font = title_font
+        ws['F1'] = f"Datum {meta.get('datum', datetime.now().strftime('%d.%m.%y'))}"
+
+        row = 3
+        gesamt = 0
+
+        for cat_key, cat_info in CATEGORIES.items():
+            cat_expenses = expenses.get(cat_key, [])
+            cat_expenses = sort_expenses_by_date(cat_expenses)
+            cat_sum = 0
+
+            ws.cell(row=row, column=1, value=f"{list(CATEGORIES.keys()).index(cat_key) + 1}. {cat_info['name']}")
+            ws.cell(row=row, column=1).fill = header_fill
+            ws.cell(row=row, column=1).font = header_font
+
+            if cat_key == 'fahrtkosten_kfz':
+                headers = ['', 'Datum', 'Fahrstrecke', 'Anlaß', 'km', '0,3', 'Betrag €']
+            else:
+                headers = ['', 'Datum', 'Beschreibung', '', '', '', 'Betrag €']
+
+            for i, h in enumerate(headers, 2):
+                ws.cell(row=row, column=i, value=h)
+                ws.cell(row=row, column=i).fill = header_fill
+                ws.cell(row=row, column=i).font = header_font
+            row += 1
+
+            for exp in cat_expenses:
+                if cat_key == 'fahrtkosten_kfz':
+                    km = float(exp.get('km', 0) or 0)
+                    betrag = km * 0.30
+                    ws.cell(row=row, column=2, value=exp.get('datum', ''))
+                    ws.cell(row=row, column=3, value=exp.get('fahrstrecke', ''))
+                    ws.cell(row=row, column=4, value=exp.get('anlass', ''))
+                    ws.cell(row=row, column=5, value=km)
+                    ws.cell(row=row, column=6, value='0,30')
+                    ws.cell(row=row, column=7, value=f"{betrag:.2f}")
+                else:
+                    betrag = float(exp.get('betrag', 0) or 0)
+                    ws.cell(row=row, column=2, value=exp.get('datum', exp.get('monat', '')))
+                    beschreibung = exp.get('beschreibung', exp.get('personen', exp.get('ort', '')))
+                    ws.cell(row=row, column=3, value=beschreibung)
+                    ws.cell(row=row, column=7, value=f"{betrag:.2f}")
+                cat_sum += betrag
+                row += 1
+
+            ws.cell(row=row, column=6, value="Summe:")
+            ws.cell(row=row, column=6).font = Font(bold=True)
+            ws.cell(row=row, column=7, value=f"{cat_sum:.2f}")
+            ws.cell(row=row, column=7).font = Font(bold=True)
+            gesamt += cat_sum
+            row += 2
+
+        ws.cell(row=row, column=6, value="GESAMT:")
+        ws.cell(row=row, column=6).font = Font(size=12, bold=True)
+        ws.cell(row=row, column=7, value=f"{gesamt:.2f}")
+        ws.cell(row=row, column=7).font = Font(size=12, bold=True)
+
+        wb.save(excel_buffer)
+        excel_buffer.seek(0)
+        zf.writestr(f"Spesen_{monat.replace(' ', '_')}.xlsx", excel_buffer.getvalue())
+
+        # 2. Belege sammeln (per file_hash)
+        cache = {}
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+
+        beleg_count = 0
+        for cat_key, cat_expenses in expenses.items():
+            for exp in cat_expenses:
+                file_hash = exp.get('file_hash')
+                if not file_hash or file_hash not in cache:
+                    continue
+
+                cache_entry = cache[file_hash]
+                datei_pfad = cache_entry.get('datei_pfad')
+                datei_name = cache_entry.get('datei', f'beleg_{beleg_count}.pdf')
+
+                if datei_pfad and os.path.exists(datei_pfad):
+                    # Beleg ins ZIP hinzufügen (in Unterordner "Belege")
+                    zf.write(datei_pfad, f"Belege/{datei_name}")
+                    beleg_count += 1
+
+        # 3. Bewirtungsbelege aus dem Export-Ordner hinzufügen
+        bewirtungsbelege_dir = get_export_dir(monat, subfolder='bewirtungsbelege')
+        if os.path.exists(bewirtungsbelege_dir):
+            for filename in os.listdir(bewirtungsbelege_dir):
+                if filename.endswith('.pdf'):
+                    filepath = os.path.join(bewirtungsbelege_dir, filename)
+                    zf.write(filepath, f"Bewirtungsbelege/{filename}")
+
+    zip_buffer.seek(0)
+
+    # Dateiname für ZIP
+    safe_monat = monat.replace(' ', '_').replace('/', '-')
+    zip_filename = f"Spesen_{safe_monat}_komplett.zip"
+
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=zip_filename
+    )
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

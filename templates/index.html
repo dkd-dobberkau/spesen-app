@@ -368,8 +368,11 @@
         <a class="btn waves-effect waves-light" onclick="exportExcel()" style="margin-right: 10px;">
             <i class="material-icons left">table_chart</i>Excel
         </a>
-        <a class="btn waves-effect waves-light" onclick="exportPDF()">
+        <a class="btn waves-effect waves-light" onclick="exportPDF()" style="margin-right: 10px;">
             <i class="material-icons left">picture_as_pdf</i>PDF
+        </a>
+        <a class="btn waves-effect waves-light purple" onclick="exportZIP()">
+            <i class="material-icons left">archive</i>ZIP (komplett)
         </a>
     </div>
 
@@ -906,6 +909,31 @@
                 a.download = `Spesen_${getMeta().monat.replace(' ', '_')}.pdf`;
                 a.click();
                 M.toast({html: 'PDF exportiert', classes: 'rounded green'});
+            });
+        }
+
+        function exportZIP() {
+            M.toast({html: 'ZIP wird erstellt...', classes: 'rounded'});
+            const data = { meta: getMeta(), expenses: expenses };
+            fetch('/export/zip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Export fehlgeschlagen');
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Spesen_${getMeta().monat.replace(' ', '_')}_komplett.zip`;
+                a.click();
+                M.toast({html: 'ZIP exportiert (Excel + Belege)', classes: 'rounded green'});
+            })
+            .catch(err => {
+                M.toast({html: 'Fehler: ' + err.message, classes: 'rounded red'});
             });
         }
 
