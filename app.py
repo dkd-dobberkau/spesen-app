@@ -968,31 +968,21 @@ def generate_pdf_buffer(meta, expenses):
                 table_data.append([exp.get('datum', ''), exp.get('fahrstrecke', ''), 
                                   exp.get('anlass', ''), f"{km:.0f}", f"{betrag:.2f} €"])
         elif cat_key == 'sonstiges':
-            table_data = [['Typ', 'Datum', 'Ort', 'Betrag']]
+            table_data = [['Typ', 'Datum', 'Ort / Beschreibung', 'Betrag']]
             for exp in cat_expenses:
                 betrag = float(exp.get('betrag', 0) or 0)
                 cat_sum += betrag
-                # Abkürzungen für lange Begriffe
+
+                # Typ (Abkürzung für Verpflegungspauschale)
                 typ = exp.get('typ', '')
                 if typ == 'Verpflegungspauschale':
                     typ = 'VP'
 
-                # Ort-Feld kondensieren
+                # Ort direkt übernehmen (wie in Web-App)
                 ort = exp.get('ort', '')
-                # Bei Uber/Taxi: nur km extrahieren wenn vorhanden
-                if typ in ('Uber', 'Taxi'):
-                    km_match = re.search(r'(\d+[.,]\d+)\s*km', ort)
-                    if km_match:
-                        ort = f"{km_match.group(1)} km"
-                    elif 'Austria' in ort or 'Wien' in ort:
-                        ort = 'Wien'
-                    elif 'Frankfurt' in ort or 'FRA' in ort:
-                        ort = 'Frankfurt'
-                    else:
-                        ort = 'Fahrt'
-                # Sonst: auf max 40 Zeichen kürzen
-                elif len(ort) > 40:
-                    ort = ort[:37] + '...'
+                # Nur bei sehr langen Texten kürzen
+                if len(ort) > 60:
+                    ort = ort[:57] + '...'
 
                 table_data.append([typ, exp.get('datum', ''), ort, f"{betrag:.2f} €"])
         elif cat_key == 'bewirtung':
