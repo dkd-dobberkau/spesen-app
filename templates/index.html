@@ -114,6 +114,7 @@
         <div class="nav-wrapper">
             <a href="#" class="brand-logo center">Spesenabrechnung</a>
             <ul class="right">
+                <li><a href="#!" onclick="openBelegScanner()" title="Beleg scannen"><i class="material-icons">document_scanner</i></a></li>
                 <li><a href="#!" onclick="openSettings()" title="Einstellungen"><i class="material-icons">settings</i></a></li>
             </ul>
         </div>
@@ -402,6 +403,79 @@
         </div>
     </div>
 
+    <!-- Beleg Scanner Modal -->
+    <div id="beleg-modal" class="modal modal-fixed-footer">
+        <div class="modal-content">
+            <h4><i class="material-icons left">document_scanner</i>Beleg scannen</h4>
+            <p class="grey-text">Laden Sie einen Beleg hoch (Foto oder PDF). Die Daten werden automatisch erkannt.</p>
+
+            <div id="upload-area" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; margin: 20px 0; transition: all 0.3s;">
+                <i class="material-icons" style="font-size: 48px; color: #999;">cloud_upload</i>
+                <p style="margin: 10px 0;">Beleg hierher ziehen oder klicken zum Auswählen</p>
+                <p class="grey-text" style="font-size: 12px;">Unterstützt: JPG, PNG, PDF</p>
+                <input type="file" id="beleg-input" accept=".jpg,.jpeg,.png,.pdf,.tiff" style="display: none;">
+            </div>
+
+            <div id="scan-progress" style="display: none; text-align: center; padding: 20px;">
+                <div class="preloader-wrapper active">
+                    <div class="spinner-layer spinner-blue-only">
+                        <div class="circle-clipper left"><div class="circle"></div></div>
+                        <div class="gap-patch"><div class="circle"></div></div>
+                        <div class="circle-clipper right"><div class="circle"></div></div>
+                    </div>
+                </div>
+                <p>Beleg wird analysiert...</p>
+            </div>
+
+            <div id="scan-result" style="display: none;">
+                <h5>Erkannte Daten</h5>
+                <div class="row">
+                    <div class="input-field col s6">
+                        <input type="text" id="beleg-datum">
+                        <label for="beleg-datum" class="active">Datum</label>
+                    </div>
+                    <div class="input-field col s6">
+                        <input type="number" id="beleg-betrag" step="0.01">
+                        <label for="beleg-betrag" class="active">Betrag €</label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="input-field col s6">
+                        <select id="beleg-kategorie">
+                            <option value="">Kategorie wählen...</option>
+                            <option value="fahrtkosten_kfz">Fahrtkosten Kfz</option>
+                            <option value="fahrtkosten_pauschale">Fahrtkostenpauschale</option>
+                            <option value="bewirtung">Bewirtungskosten</option>
+                            <option value="fachliteratur">Fachliteratur</option>
+                            <option value="bueromaterial">Büromaterial</option>
+                            <option value="telefonkosten">Telefonkosten</option>
+                            <option value="software">Software</option>
+                            <option value="getraenke">Getränke</option>
+                            <option value="sonstiges">Sonstiges</option>
+                        </select>
+                        <label>Kategorie</label>
+                    </div>
+                    <div class="input-field col s6">
+                        <input type="text" id="beleg-beschreibung">
+                        <label for="beleg-beschreibung" class="active">Beschreibung</label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col s12">
+                        <label>Erkannter Text (zur Kontrolle)</label>
+                        <textarea id="beleg-rawtext" class="materialize-textarea" style="font-size: 11px; min-height: 200px; max-height: 400px; background: #f5f5f5; padding: 10px; overflow-y: auto;" readonly></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Abbrechen</a>
+            <a href="#!" class="btn waves-effect waves-light" id="btn-add-beleg" onclick="addBelegToExpenses()" style="display: none;">
+                <i class="material-icons left">add</i>Hinzufügen
+            </a>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div id="settings-modal" class="modal">
         <div class="modal-content">
@@ -521,7 +595,10 @@
         function renderCategory(category) {
             const list = document.getElementById(`list-${category}`);
             const config = categoryConfig[category];
-            
+
+            // Badge immer aktualisieren
+            document.getElementById(`badge-${category}`).textContent = expenses[category].length;
+
             if (expenses[category].length === 0) {
                 list.innerHTML = '<p class="grey-text center">Keine Einträge</p>';
                 return;
@@ -559,7 +636,6 @@
             });
             
             list.innerHTML = html;
-            document.getElementById(`badge-${category}`).textContent = expenses[category].length;
         }
 
         function calculateCategorySum(category) {
@@ -1009,6 +1085,191 @@
             modal.close();
 
             M.toast({html: 'Eintrag aktualisiert', classes: 'rounded green'});
+        }
+
+        // Beleg Scanner Functions
+        function openBelegScanner() {
+            // Reset modal state
+            document.getElementById('upload-area').style.display = 'block';
+            document.getElementById('scan-progress').style.display = 'none';
+            document.getElementById('scan-result').style.display = 'none';
+            document.getElementById('btn-add-beleg').style.display = 'none';
+            document.getElementById('beleg-input').value = '';
+
+            const modal = M.Modal.getInstance(document.getElementById('beleg-modal'));
+            modal.open();
+        }
+
+        // Initialize upload area events
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadArea = document.getElementById('upload-area');
+            const belegInput = document.getElementById('beleg-input');
+
+            // Click to upload
+            uploadArea.addEventListener('click', () => belegInput.click());
+
+            // Drag & Drop
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#333';
+                uploadArea.style.background = '#f0f0f0';
+            });
+
+            uploadArea.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#ccc';
+                uploadArea.style.background = 'transparent';
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#ccc';
+                uploadArea.style.background = 'transparent';
+
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    processBeleg(files[0]);
+                }
+            });
+
+            // File input change
+            belegInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    processBeleg(e.target.files[0]);
+                }
+            });
+
+            // Init select in beleg modal
+            M.FormSelect.init(document.getElementById('beleg-kategorie'));
+        });
+
+        function processBeleg(file) {
+            // Validate file type
+            const validTypes = ['image/jpeg', 'image/png', 'image/tiff', 'application/pdf'];
+            if (!validTypes.includes(file.type)) {
+                M.toast({html: 'Ungültiges Dateiformat', classes: 'rounded red'});
+                return;
+            }
+
+            // Show progress
+            document.getElementById('upload-area').style.display = 'none';
+            document.getElementById('scan-progress').style.display = 'block';
+            document.getElementById('scan-result').style.display = 'none';
+
+            // Upload and parse
+            const formData = new FormData();
+            formData.append('beleg', file);
+
+            fetch('/api/parse-beleg', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('scan-progress').style.display = 'none';
+
+                if (data.error) {
+                    M.toast({html: 'Fehler: ' + data.error, classes: 'rounded red'});
+                    document.getElementById('upload-area').style.display = 'block';
+                    return;
+                }
+
+                // Show results
+                document.getElementById('scan-result').style.display = 'block';
+                document.getElementById('btn-add-beleg').style.display = 'inline-block';
+
+                // Extract data from response (backend returns {success, data: {...}})
+                const extracted = data.data || data;
+
+                // Fill in extracted data
+                document.getElementById('beleg-datum').value = extracted.datum || '';
+                document.getElementById('beleg-betrag').value = extracted.betrag || '';
+                document.getElementById('beleg-beschreibung').value = extracted.beschreibung || '';
+                document.getElementById('beleg-rawtext').value = extracted.raw_text || '';
+
+                // Set category if suggested
+                if (extracted.kategorie_vorschlag) {
+                    const katSelect = document.getElementById('beleg-kategorie');
+                    katSelect.value = extracted.kategorie_vorschlag;
+                    M.FormSelect.init(katSelect);
+                }
+
+                M.updateTextFields();
+                M.toast({html: 'Beleg analysiert', classes: 'rounded green'});
+            })
+            .catch(err => {
+                document.getElementById('scan-progress').style.display = 'none';
+                document.getElementById('upload-area').style.display = 'block';
+                M.toast({html: 'Fehler: ' + err.message, classes: 'rounded red'});
+            });
+        }
+
+        function addBelegToExpenses() {
+            const datum = document.getElementById('beleg-datum').value;
+            const betrag = document.getElementById('beleg-betrag').value;
+            const beschreibung = document.getElementById('beleg-beschreibung').value;
+            const kategorie = document.getElementById('beleg-kategorie').value;
+
+            if (!kategorie) {
+                M.toast({html: 'Bitte Kategorie wählen', classes: 'rounded red'});
+                return;
+            }
+
+            if (!betrag) {
+                M.toast({html: 'Bitte Betrag eingeben', classes: 'rounded red'});
+                return;
+            }
+
+            // Create expense based on category
+            let expense = {};
+
+            if (kategorie === 'fahrtkosten_kfz') {
+                // Needs special handling - km instead of betrag
+                const km = Math.round(parseFloat(betrag) / 0.30);
+                expense = {
+                    datum: datum,
+                    fahrstrecke: beschreibung,
+                    anlass: 'Aus Beleg importiert',
+                    km: km.toString()
+                };
+            } else if (kategorie === 'fahrtkosten_pauschale') {
+                expense = {
+                    monat: datum,
+                    beschreibung: beschreibung || 'Aus Beleg importiert',
+                    betrag: betrag
+                };
+            } else if (kategorie === 'bewirtung') {
+                expense = {
+                    datum: datum,
+                    personen: beschreibung || 'Aus Beleg importiert',
+                    betrag: betrag
+                };
+            } else if (kategorie === 'sonstiges') {
+                expense = {
+                    typ: 'Sonstiges',
+                    datum: datum,
+                    ort: beschreibung || 'Aus Beleg importiert',
+                    betrag: betrag
+                };
+            } else {
+                // Standard categories: fachliteratur, bueromaterial, telefonkosten, software, getraenke
+                expense = {
+                    datum: datum,
+                    beschreibung: beschreibung || 'Aus Beleg importiert',
+                    betrag: betrag
+                };
+            }
+
+            expenses[kategorie].push(expense);
+            renderCategory(kategorie);
+            updateTotals();
+            saveData();
+
+            // Close modal
+            const modal = M.Modal.getInstance(document.getElementById('beleg-modal'));
+            modal.close();
+
+            M.toast({html: 'Beleg hinzugefügt', classes: 'rounded green'});
         }
     </script>
 </body>

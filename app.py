@@ -11,11 +11,26 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
+from PIL import Image
+import anthropic
+import pytesseract
 import base64
 import io
 import json
 import os
+import re
 import sqlite3
+
+# Load environment variables
+load_dotenv()
+
+# Optional: pdf2image for PDF support
+try:
+    from pdf2image import convert_from_bytes
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 
 app = Flask(__name__)
 
@@ -134,6 +149,217 @@ def index():
 @app.route('/api/verpflegungspauschalen')
 def get_verpflegungspauschalen():
     return jsonify(VERPFLEGUNGSPAUSCHALEN)
+
+# Claude API Client
+def get_anthropic_client():
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    print(f"[DEBUG] API Key vorhanden: {bool(api_key)}, Länge: {len(api_key) if api_key else 0}")
+    if not api_key:
+        return None
+    return anthropic.Anthropic(api_key=api_key)
+
+# Beleg-Parser mit Claude AI
+def extract_receipt_data_with_ai(text, image_base64=None):
+    """Extrahiert Daten aus Beleg mit Claude AI"""
+    client = get_anthropic_client()
+
+    if not client:
+        # Fallback auf einfache Regex wenn kein API Key
+        return extract_receipt_data_fallback(text)
+
+    prompt = """Analysiere diesen Beleg/Quittung und extrahiere die folgenden Informationen.
+Antworte NUR mit einem JSON-Objekt, ohne zusätzlichen Text.
+
+Kategorien zur Auswahl:
+- fahrtkosten_kfz: Tankbelege, Benzin, Diesel
+- fahrtkosten_pauschale: Fahrkarten, Tickets (Bahn, Bus, ÖPNV)
+- bewirtung: Restaurant, Bar, Café, Bewirtungskosten
+- fachliteratur: Bücher, Fachbücher
+- bueromaterial: Bürobedarf, Druckerpatronen
+- telefonkosten: Telefon, Mobilfunk, Prepaid-Aufladungen
+- software: Software-Lizenzen, Abos
+- getraenke: Getränke fürs Büro
+- sonstiges: Parken, Taxi, Übernachtung, alles andere
+
+JSON Format:
+{
+  "datum": "TT.MM.JJJJ",
+  "betrag": 123.45,
+  "waehrung": "EUR",
+  "kategorie": "bewirtung",
+  "beschreibung": "Kurze Beschreibung",
+  "anbieter": "Name des Geschäfts/Restaurants"
+}
+
+Wichtig:
+- Datum im deutschen Format TT.MM.JJJJ
+- Betrag als Zahl (nicht als String)
+- Bei handschriftlichen Beträgen: bestmöglich interpretieren
+- Bei Bewirtung: Restaurant-Name als Beschreibung
+- Bei unleserlichen Werten: null verwenden
+
+Beleg-Text:
+"""
+
+    try:
+        # Wenn wir ein Bild haben, nutze Vision
+        if image_base64:
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": image_base64
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt + text
+                            }
+                        ]
+                    }
+                ]
+            )
+        else:
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt + text
+                    }
+                ]
+            )
+
+        # Parse JSON response
+        response_text = message.content[0].text.strip()
+
+        # Entferne mögliche Markdown-Codeblocks
+        if response_text.startswith('```'):
+            response_text = response_text.split('```')[1]
+            if response_text.startswith('json'):
+                response_text = response_text[4:]
+        response_text = response_text.strip()
+
+        data = json.loads(response_text)
+
+        return {
+            'datum': data.get('datum'),
+            'betrag': data.get('betrag'),
+            'waehrung': data.get('waehrung', 'EUR'),
+            'kategorie_vorschlag': data.get('kategorie'),
+            'beschreibung': data.get('beschreibung') or data.get('anbieter'),
+            'anbieter': data.get('anbieter'),
+            'raw_text': text
+        }
+
+    except Exception as e:
+        print(f"Claude API Fehler: {e}")
+        # Fallback auf Regex
+        return extract_receipt_data_fallback(text)
+
+def extract_receipt_data_fallback(text):
+    """Einfacher Fallback wenn keine AI verfügbar"""
+    result = {
+        'datum': None,
+        'betrag': None,
+        'beschreibung': None,
+        'kategorie_vorschlag': None,
+        'raw_text': text
+    }
+
+    # Einfache Datum-Erkennung
+    date_match = re.search(r'(\d{1,2})[./](\d{1,2})[./](\d{2,4})', text)
+    if date_match:
+        day, month, year = date_match.groups()
+        if len(year) == 2:
+            year = '20' + year
+        result['datum'] = f"{int(day):02d}.{int(month):02d}.{year}"
+
+    # Einfache Betrag-Erkennung
+    amount_match = re.search(r'(\d+)[,.](\d{2})\s*(?:EUR|€)', text, re.IGNORECASE)
+    if amount_match:
+        result['betrag'] = float(f"{amount_match.group(1)}.{amount_match.group(2)}")
+
+    return result
+
+@app.route('/api/parse-beleg', methods=['POST'])
+def parse_beleg():
+    """Parst einen hochgeladenen Beleg (Bild oder PDF) mit Claude AI"""
+    if 'beleg' not in request.files:
+        return jsonify({'error': 'Keine Datei hochgeladen'}), 400
+
+    file = request.files['beleg']
+    if file.filename == '':
+        return jsonify({'error': 'Keine Datei ausgewählt'}), 400
+
+    try:
+        filename = file.filename.lower()
+        images = []
+        first_image_base64 = None
+
+        if filename.endswith('.pdf'):
+            if not PDF_SUPPORT:
+                return jsonify({'error': 'PDF-Support nicht verfügbar. Bitte poppler installieren.'}), 400
+            # PDF zu Bildern konvertieren
+            pdf_bytes = file.read()
+            images = convert_from_bytes(pdf_bytes, dpi=300)
+        elif filename.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
+            # Bild direkt laden
+            images = [Image.open(file)]
+        else:
+            return jsonify({'error': 'Nicht unterstütztes Dateiformat. Erlaubt: PDF, PNG, JPG, TIFF'}), 400
+
+        # OCR auf allen Seiten/Bildern durchführen
+        full_text = ""
+        for idx, img in enumerate(images):
+            # Original für AI-Vision speichern (erstes Bild)
+            if idx == 0:
+                # Bild für Claude vorbereiten (max 1568px, als JPEG)
+                img_for_ai = img.copy()
+                img_for_ai.thumbnail((1568, 1568), Image.LANCZOS)
+                if img_for_ai.mode in ('RGBA', 'P'):
+                    img_for_ai = img_for_ai.convert('RGB')
+                buffer = io.BytesIO()
+                img_for_ai.save(buffer, format='JPEG', quality=85)
+                first_image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            # Bild für OCR optimieren
+            width, height = img.size
+            if width < 2000:
+                scale = 2000 / width
+                img = img.resize((int(width * scale), int(height * scale)), Image.LANCZOS)
+
+            # Graustufen
+            img_gray = img.convert('L')
+
+            # OCR
+            custom_config = r'--oem 3 --psm 3'
+            text = pytesseract.image_to_string(img_gray, lang='deu+eng', config=custom_config)
+            full_text += text + "\n"
+
+        full_text = full_text.strip()
+
+        # Daten mit Claude AI extrahieren (mit Bild für bessere Erkennung)
+        extracted = extract_receipt_data_with_ai(full_text, first_image_base64)
+
+        return jsonify({
+            'success': True,
+            'data': extracted
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Fehler beim Parsen: {str(e)}'}), 500
 
 # API: Einstellungen laden
 @app.route('/api/einstellungen', methods=['GET'])
@@ -448,14 +674,37 @@ def export_pdf():
                 typ = exp.get('typ', '')
                 if typ == 'Verpflegungspauschale':
                     typ = 'VP'
-                table_data.append([typ, exp.get('datum', ''),
-                                  exp.get('ort', ''), f"{betrag:.2f} €"])
+
+                # Ort-Feld kondensieren
+                ort = exp.get('ort', '')
+                # Bei Uber/Taxi: nur km extrahieren wenn vorhanden
+                if typ in ('Uber', 'Taxi'):
+                    km_match = re.search(r'(\d+[.,]\d+)\s*km', ort)
+                    if km_match:
+                        ort = f"{km_match.group(1)} km"
+                    elif 'Austria' in ort or 'Wien' in ort:
+                        ort = 'Wien'
+                    elif 'Frankfurt' in ort or 'FRA' in ort:
+                        ort = 'Frankfurt'
+                    else:
+                        ort = 'Fahrt'
+                # Sonst: auf max 40 Zeichen kürzen
+                elif len(ort) > 40:
+                    ort = ort[:37] + '...'
+
+                table_data.append([typ, exp.get('datum', ''), ort, f"{betrag:.2f} €"])
         elif cat_key == 'bewirtung':
-            table_data = [['Datum', 'Bewirtete Personen', 'Betrag']]
+            table_data = [['Datum', 'Restaurant', 'Betrag']]
             for exp in cat_expenses:
                 betrag = float(exp.get('betrag', 0) or 0)
                 cat_sum += betrag
-                table_data.append([exp.get('datum', ''), exp.get('personen', ''), f"{betrag:.2f} €"])
+                # Restaurant-Name extrahieren (erster Teil vor " - ")
+                personen = exp.get('personen', '')
+                restaurant = personen.split(' - ')[0] if ' - ' in personen else personen
+                # Auf max 50 Zeichen begrenzen
+                if len(restaurant) > 50:
+                    restaurant = restaurant[:47] + '...'
+                table_data.append([exp.get('datum', ''), restaurant, f"{betrag:.2f} €"])
         else:
             table_data = [['Datum', 'Beschreibung', 'Betrag']]
             for exp in cat_expenses:
