@@ -254,7 +254,7 @@ VERPFLEGUNGSPAUSCHALEN = {
 
 CATEGORIES = {
     'fahrtkosten_kfz': {'name': 'Fahrtkosten mit priv. Kfz.', 'fields': ['datum', 'fahrstrecke', 'anlass', 'km'], 'rate': 0.30},
-    'fahrtkosten_pauschale': {'name': 'Fahrtkostenpauschale', 'fields': ['monat', 'beschreibung', 'betrag']},
+    'fahrtkosten_pauschale': {'name': 'Fahrtkosten Öffentliche Verkehrsmittel', 'fields': ['monat', 'beschreibung', 'betrag']},
     'bewirtung': {'name': 'Bewirtungskosten', 'fields': ['datum', 'personen', 'betrag']},
     'fachliteratur': {'name': 'Fachliteratur', 'fields': ['datum', 'beschreibung', 'betrag']},
     'bueromaterial': {'name': 'Büromaterial', 'fields': ['datum', 'beschreibung', 'betrag']},

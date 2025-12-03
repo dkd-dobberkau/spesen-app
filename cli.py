@@ -325,7 +325,7 @@ def archive_file(filepath, monat_str):
 
 CATEGORIES = {
     'fahrtkosten_kfz': 'Fahrtkosten mit priv. Kfz.',
-    'fahrtkosten_pauschale': 'Fahrtkostenpauschale',
+    'fahrtkosten_pauschale': 'Fahrtkosten Öffentliche Verkehrsmittel',
     'bewirtung': 'Bewirtungskosten',
     'fachliteratur': 'Fachliteratur',
     'bueromaterial': 'Büromaterial',
