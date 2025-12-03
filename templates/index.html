@@ -1305,21 +1305,48 @@
             document.getElementById('bew-restaurant').value = restaurant;
             document.getElementById('bew-personen-original').value = bewirtetePersonen;
 
-            // Teilnehmer-Liste zurücksetzen
+            // Anlass aus gespeichertem Wert oder Default
+            document.getElementById('bew-anlass').value = exp.anlass || 'Geschäftliche Besprechung';
+
+            // Teilnehmer-Liste befüllen
             const liste = document.getElementById('teilnehmer-liste');
-            liste.innerHTML = `
-                <div class="row teilnehmer-row">
-                    <div class="input-field col s6">
-                        <input type="text" class="teilnehmer-name" placeholder="Name">
+            const gespeicherteTeilnehmer = exp.teilnehmer || [];
+
+            if (gespeicherteTeilnehmer.length > 0) {
+                // Gespeicherte Teilnehmer anzeigen
+                let html = '';
+                gespeicherteTeilnehmer.forEach(t => {
+                    html += `
+                        <div class="row teilnehmer-row">
+                            <div class="input-field col s6">
+                                <input type="text" class="teilnehmer-name" placeholder="Name" value="${t.name || ''}">
+                            </div>
+                            <div class="input-field col s5">
+                                <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion" value="${t.firma || ''}">
+                            </div>
+                            <div class="col s1 center-align" style="padding-top: 20px;">
+                                <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
+                            </div>
+                        </div>
+                    `;
+                });
+                liste.innerHTML = html;
+            } else {
+                // Leere Zeile für neue Eingabe
+                liste.innerHTML = `
+                    <div class="row teilnehmer-row">
+                        <div class="input-field col s6">
+                            <input type="text" class="teilnehmer-name" placeholder="Name">
+                        </div>
+                        <div class="input-field col s5">
+                            <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion">
+                        </div>
+                        <div class="col s1 center-align" style="padding-top: 20px;">
+                            <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
+                        </div>
                     </div>
-                    <div class="input-field col s5">
-                        <input type="text" class="teilnehmer-firma" placeholder="Firma/Funktion">
-                    </div>
-                    <div class="col s1 center-align" style="padding-top: 20px;">
-                        <i class="material-icons grey-text" style="cursor: pointer;" onclick="removeTeilnehmer(this)">remove_circle</i>
-                    </div>
-                </div>
-            `;
+                `;
+            }
 
             // Gespeicherte Personen als Chips anzeigen
             renderPersonenChips();
@@ -1434,15 +1461,23 @@
             // Aktualisierte Werte aus dem Modal holen
             const restaurant = document.getElementById('bew-restaurant').value.trim();
             const bewirtetePersonen = document.getElementById('bew-personen-original').value.trim();
+            const anlass = document.getElementById('bew-anlass').value.trim();
 
-            // Haupteintrag aktualisieren (Format: "Restaurant - Personen")
+            // Haupteintrag aktualisieren
             let neuesPersonenFeld = restaurant;
             if (bewirtetePersonen) {
                 neuesPersonenFeld = restaurant + ' - ' + bewirtetePersonen;
             }
             expenses.bewirtung[currentBewirtungIndex].personen = neuesPersonenFeld;
+            expenses.bewirtung[currentBewirtungIndex].teilnehmer = teilnehmer;  // Teilnehmer speichern
+            expenses.bewirtung[currentBewirtungIndex].anlass = anlass;  // Anlass speichern
             renderCategory('bewirtung');
             saveData();
+
+            // Wenn aus DB geladen, auch dort speichern
+            if (currentAbrechnungId) {
+                saveToDatabase();
+            }
 
             // Monat für Ordnername
             const monat = document.getElementById('meta-monat').value || 'Unbekannt';
