@@ -1628,6 +1628,10 @@
             // Monat für Ordnername
             const monat = document.getElementById('meta-monat').value || 'Unbekannt';
 
+            // Belegnummer berechnen (gleiche Nummer wie in der Liste)
+            const startNr = getStartNumberForCategory('bewirtung');
+            const belegNr = startNr + currentBewirtungIndex;
+
             const data = {
                 datum: exp.datum,
                 restaurant: restaurant,
@@ -1637,7 +1641,8 @@
                 bewirtende_person: userSettings.name || '',
                 teilnehmer: teilnehmer,
                 unterschrift_base64: unterschriftBase64,  // Unterschrift für PDF
-                monat: monat  // Für Ordnerstruktur
+                monat: monat,  // Für Ordnerstruktur
+                beleg_nr: belegNr  // Fortlaufende Belegnummer
             };
 
             fetch('/export/bewirtungsbeleg', {

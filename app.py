@@ -1221,6 +1221,7 @@ def export_bewirtungsbeleg():
     teilnehmer = data.get('teilnehmer', [])  # Liste von {name, firma}
     unterschrift_base64 = data.get('unterschrift_base64', None)
     monat = data.get('monat', 'Unbekannt')
+    beleg_nr = data.get('beleg_nr', None)  # Fortlaufende Belegnummer
 
     output = io.BytesIO()
     doc = SimpleDocTemplate(output, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm,
@@ -1238,8 +1239,11 @@ def export_bewirtungsbeleg():
 
     elements = []
 
-    # Titel
-    elements.append(Paragraph("Bewirtungsbeleg", title_style))
+    # Titel (mit Belegnummer falls vorhanden)
+    if beleg_nr:
+        elements.append(Paragraph(f"Bewirtungsbeleg Nr. {beleg_nr}", title_style))
+    else:
+        elements.append(Paragraph("Bewirtungsbeleg", title_style))
     elements.append(Paragraph("gemäß § 4 Abs. 5 Nr. 2 EStG", subtitle_style))
     elements.append(Spacer(1, 10*mm))
 
@@ -1397,7 +1401,11 @@ def export_bewirtungsbeleg():
     safe_restaurant = re.sub(r'[^\w\s-]', '', restaurant).strip()
     safe_restaurant = re.sub(r'\s+', '_', safe_restaurant)[:25]
 
-    filename = f"{iso_datum}_{safe_restaurant}_Bewirtungsbeleg.pdf"
+    # Dateiname mit Belegnummer falls vorhanden
+    if beleg_nr:
+        filename = f"{beleg_nr:02d}_{iso_datum}_{safe_restaurant}_Bewirtungsbeleg.pdf"
+    else:
+        filename = f"{iso_datum}_{safe_restaurant}_Bewirtungsbeleg.pdf"
 
     # Ordner für Kostenerstattung erstellen (exports/Jahr/Monat/bewirtungsbelege/)
     bewirtungsbelege_dir = get_export_dir(monat, subfolder='bewirtungsbelege')
