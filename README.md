@@ -9,8 +9,9 @@ Automatische Spesenabrechnung mit KI-gestützter Belegerkennung.
 - **KI-Erkennung**: Claude AI analysiert Belege und extrahiert Daten automatisch
 - **Währungsumrechnung**: Automatische Konvertierung von Fremdwährungen (EZB-Kurse)
 - **Kategorien**: Fahrtkosten, Bewirtung, Telefonkosten, Uber/Taxi, etc.
-- **Export**: Excel und PDF (organisiert nach Jahr/Monat)
+- **Export**: Excel, PDF und ZIP-Bundle (organisiert nach Jahr/Monat)
 - **Inbox/Archiv**: Automatische Archivierung verarbeiteter Belege
+- **Personen-Verwaltung**: Kontakte mit VCF-Import für Bewirtungsbelege
 - **Caching**: Bereits verarbeitete Belege werden gecacht (MD5-basiert)
 - **Production-Ready**: Gunicorn WSGI-Server + Traefik Reverse Proxy
 
@@ -169,7 +170,7 @@ python cli.py /pfad/zu/belegen --format json
 ## Unterstützte Belegtypen
 
 - **Fahrtkosten KFZ**: Tankbelege (Benzin, Diesel)
-- **Fahrtkostenpauschale**: ÖPNV-Tickets, Bahnfahrkarten
+- **Fahrtkosten ÖPNV**: ÖPNV-Tickets, Bahnfahrkarten
 - **Bewirtung**: Restaurant, Bar, Café (+ Bewirtungsbeleg-PDF)
 - **Uber/Taxi**: Automatische Stadt- und km-Erkennung
 - **Telefonkosten**: Prepaid-Aufladungen, Mobilfunk
@@ -187,7 +188,12 @@ Fremdwährungen (CHF, DKK, USD, etc.) werden automatisch nach EUR konvertiert:
 ### Umgebungsvariablen (.env)
 
 ```env
+# Erforderlich
 ANTHROPIC_API_KEY=sk-ant-api03-...
+
+# Encryption Key für sensible Daten (IBAN, BIC)
+# Generieren: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+ENCRYPTION_KEY=
 
 # Optional
 GUNICORN_WORKERS=4
@@ -212,7 +218,11 @@ Die App enthält die deutschen Verpflegungspauschalen 2025 für verschiedene Lä
 | `/api/parse-beleg` | POST | Beleg mit KI analysieren |
 | `/export/excel` | POST | Excel-Export |
 | `/export/pdf` | POST | PDF-Export |
+| `/export/zip` | POST | ZIP-Bundle (Excel + PDF + Belege) |
 | `/export/bewirtungsbeleg` | POST | Bewirtungsbeleg nach §4 EStG |
+| `/api/personen` | GET/POST | Personen verwalten |
+| `/api/personen/import-vcf` | POST | VCF-Kontakte importieren |
+| `/api/beleg/<hash>` | GET | Original-Beleg abrufen |
 
 ## Datenbank
 
@@ -226,7 +236,8 @@ SQLite-Datenbank (`data/spesen.db`) mit folgenden Tabellen:
 ## Sicherheit
 
 - IBAN/BIC werden mit Fernet (AES) verschlüsselt gespeichert
-- `secret.key` wird automatisch generiert und sollte nicht committed werden
+- `ENCRYPTION_KEY` in `.env` speichern für Persistenz nach Redeployment
+- Fallback auf `data/secret.key` für Abwärtskompatibilität
 - `.env` enthält API-Keys und ist in `.gitignore`
 - Non-root User im Docker-Container
 - Gunicorn mit Request-Limits
