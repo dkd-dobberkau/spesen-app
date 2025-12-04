@@ -10,14 +10,18 @@ __pycache__/
 venv/
 ENV/
 
-# Database
+# Database & Data
 *.db
+data/
 
 # Cache
 .beleg_cache.json
 
 # Secret key - NEVER commit!
 secret.key
+
+# Belege (user data)
+belege/
 
 # IDE
 .idea/
