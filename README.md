@@ -111,6 +111,8 @@ spesen-app/
 └── logs/                   # Gunicorn Logs
 ```
 
+> **Hinweis für Docker:** Diese Ordner werden über Volume-Mounts auf den Host gemappt (siehe `docker-compose.yml`). Dadurch bleiben alle Daten auch nach einem Container-Neustart oder -Update erhalten. Alternativ können die Volumes auch in einem persistenten Daten-Container oder Docker-Volume gespeichert werden.
+
 ## CLI-Verwendung
 
 ### Inbox/Archiv Workflow (empfohlen)
