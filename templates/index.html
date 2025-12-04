@@ -806,6 +806,17 @@
             }
         }
 
+        // Berechnet die Startnummer für eine Kategorie (fortlaufend über alle Kategorien)
+        function getStartNumberForCategory(category) {
+            const categoryOrder = Object.keys(expenses);
+            let startNr = 1;
+            for (const cat of categoryOrder) {
+                if (cat === category) break;
+                startNr += expenses[cat].length;
+            }
+            return startNr;
+        }
+
         function renderCategory(category) {
             const list = document.getElementById(`list-${category}`);
             const config = categoryConfig[category];
@@ -817,9 +828,13 @@
                 list.innerHTML = '<p class="grey-text center">Keine Einträge</p>';
                 return;
             }
-            
+
+            // Startnummer für diese Kategorie berechnen
+            const startNr = getStartNumberForCategory(category);
+
             let html = '';
             expenses[category].forEach((exp, index) => {
+                const belegNr = startNr + index;
                 let betrag = 0;
                 let details = '';
                 
@@ -850,7 +865,8 @@
 
                 html += `
                     <div class="expense-item row valign-wrapper" style="margin-bottom: 5px;">
-                        <div class="col s6 m7">${details}</div>
+                        <div class="col s1" style="min-width: 35px;"><span class="badge grey lighten-2" style="border-radius: 4px; padding: 2px 6px;">${belegNr}</span></div>
+                        <div class="col s5 m6">${details}</div>
                         <div class="col s3 m2 right-align"><strong>${betrag.toFixed(2)} €</strong></div>
                         <div class="col s3 m3 right-align">
                             ${belegBtn}

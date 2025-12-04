@@ -211,6 +211,7 @@
 - [x] Docker-Setup mit Traefik
 - [x] Setup- und Test-Scripts
 - [x] Verschlüsselung sensibler Daten (IBAN/BIC)
+- [x] Durchnummerierung der Belege (Export + Web-App)
 
 ---
 

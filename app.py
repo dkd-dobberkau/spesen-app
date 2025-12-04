@@ -945,7 +945,8 @@ def export_excel():
     
     row = 3
     gesamt = 0
-    
+    beleg_nr = 1  # Fortlaufende Belegnummer
+
     for cat_key, cat_info in CATEGORIES.items():
         cat_expenses = expenses.get(cat_key, [])
         # Nach Datum sortieren
@@ -956,46 +957,51 @@ def export_excel():
         ws.cell(row=row, column=1, value=f"{list(CATEGORIES.keys()).index(cat_key) + 1}. {cat_info['name']}")
         ws.cell(row=row, column=1).fill = header_fill
         ws.cell(row=row, column=1).font = header_font
-        
+
         if cat_key == 'fahrtkosten_kfz':
-            headers = ['', 'Datum', 'Fahrstrecke', 'Anlaß', 'km', '0,3', 'Betrag €']
+            headers = ['Nr.', 'Datum', 'Fahrstrecke', 'Anlaß', 'km', '0,3', 'Betrag €']
             for i, h in enumerate(headers, 2):
                 ws.cell(row=row, column=i, value=h)
                 ws.cell(row=row, column=i).fill = header_fill
                 ws.cell(row=row, column=i).font = header_font
-        
+
         row += 1
         start_row = row
-        
+
         for exp in cat_expenses:
+            # Belegnummer in erste Spalte (außer bei Sonstiges, da steht der Typ)
+            if cat_key != 'sonstiges':
+                ws.cell(row=row, column=2, value=beleg_nr)
+
             if cat_key == 'fahrtkosten_kfz':
-                ws.cell(row=row, column=2, value=exp.get('datum', ''))
-                ws.cell(row=row, column=3, value=exp.get('fahrstrecke', ''))
-                ws.cell(row=row, column=4, value=exp.get('anlass', ''))
+                ws.cell(row=row, column=3, value=exp.get('datum', ''))
+                ws.cell(row=row, column=4, value=exp.get('fahrstrecke', ''))
+                ws.cell(row=row, column=5, value=exp.get('anlass', ''))
                 km = float(exp.get('km', 0) or 0)
-                ws.cell(row=row, column=5, value=km)
+                ws.cell(row=row, column=6, value=km)
                 betrag = km * 0.30
-                ws.cell(row=row, column=7, value=betrag)
+                ws.cell(row=row, column=8, value=betrag)
                 cat_sum += betrag
             elif cat_key == 'sonstiges':
-                ws.cell(row=row, column=1, value=exp.get('typ', ''))
+                ws.cell(row=row, column=1, value=f"{beleg_nr}. {exp.get('typ', '')}")
                 ws.cell(row=row, column=2, value=exp.get('datum', ''))
                 ws.cell(row=row, column=3, value=exp.get('ort', ''))
                 betrag = float(exp.get('betrag', 0) or 0)
                 ws.cell(row=row, column=7, value=betrag)
                 cat_sum += betrag
             elif cat_key == 'bewirtung':
-                ws.cell(row=row, column=2, value=exp.get('datum', ''))
-                ws.cell(row=row, column=4, value=exp.get('personen', ''))
+                ws.cell(row=row, column=3, value=exp.get('datum', ''))
+                ws.cell(row=row, column=5, value=exp.get('personen', ''))
                 betrag = float(exp.get('betrag', 0) or 0)
-                ws.cell(row=row, column=7, value=betrag)
+                ws.cell(row=row, column=8, value=betrag)
                 cat_sum += betrag
             else:
-                ws.cell(row=row, column=2, value=exp.get('datum', '') or exp.get('monat', ''))
-                ws.cell(row=row, column=3, value=exp.get('beschreibung', ''))
+                ws.cell(row=row, column=3, value=exp.get('datum', '') or exp.get('monat', ''))
+                ws.cell(row=row, column=4, value=exp.get('beschreibung', ''))
                 betrag = float(exp.get('betrag', 0) or 0)
-                ws.cell(row=row, column=7, value=betrag)
+                ws.cell(row=row, column=8, value=betrag)
                 cat_sum += betrag
+            beleg_nr += 1
             row += 1
         
         if not cat_expenses:
@@ -1058,7 +1064,8 @@ def generate_pdf_buffer(meta, expenses):
     elements.append(Spacer(1, 10*mm))
     
     gesamt = 0
-    
+    beleg_nr = 1  # Fortlaufende Belegnummer über alle Kategorien
+
     for cat_key, cat_info in CATEGORIES.items():
         cat_expenses = expenses.get(cat_key, [])
         if not cat_expenses:
@@ -1069,18 +1076,19 @@ def generate_pdf_buffer(meta, expenses):
 
         cat_sum = 0
         elements.append(Paragraph(cat_info['name'], styles['Heading2']))
-        
-        # Build table data
+
+        # Build table data with Nr. column
         if cat_key == 'fahrtkosten_kfz':
-            table_data = [['Datum', 'Fahrstrecke', 'Anlaß', 'km', 'Betrag']]
+            table_data = [['Nr.', 'Datum', 'Fahrstrecke', 'Anlaß', 'km', 'Betrag']]
             for exp in cat_expenses:
                 km = float(exp.get('km', 0) or 0)
                 betrag = km * 0.30
                 cat_sum += betrag
-                table_data.append([exp.get('datum', ''), exp.get('fahrstrecke', ''), 
+                table_data.append([str(beleg_nr), exp.get('datum', ''), exp.get('fahrstrecke', ''),
                                   exp.get('anlass', ''), f"{km:.0f}", f"{betrag:.2f} €"])
+                beleg_nr += 1
         elif cat_key == 'sonstiges':
-            table_data = [['Typ', 'Datum', 'Ort / Beschreibung', 'Betrag']]
+            table_data = [['Nr.', 'Typ', 'Datum', 'Ort / Beschreibung', 'Betrag']]
             for exp in cat_expenses:
                 betrag = float(exp.get('betrag', 0) or 0)
                 cat_sum += betrag
@@ -1093,49 +1101,52 @@ def generate_pdf_buffer(meta, expenses):
                 # Ort direkt übernehmen (wie in Web-App)
                 ort = exp.get('ort', '')
                 # Nur bei sehr langen Texten kürzen
-                if len(ort) > 60:
-                    ort = ort[:57] + '...'
+                if len(ort) > 55:
+                    ort = ort[:52] + '...'
 
-                table_data.append([typ, exp.get('datum', ''), ort, f"{betrag:.2f} €"])
+                table_data.append([str(beleg_nr), typ, exp.get('datum', ''), ort, f"{betrag:.2f} €"])
+                beleg_nr += 1
         elif cat_key == 'bewirtung':
-            table_data = [['Datum', 'Restaurant', 'Betrag']]
+            table_data = [['Nr.', 'Datum', 'Restaurant', 'Betrag']]
             for exp in cat_expenses:
                 betrag = float(exp.get('betrag', 0) or 0)
                 cat_sum += betrag
                 # Restaurant-Name extrahieren (erster Teil vor " - ")
                 personen = exp.get('personen', '')
                 restaurant = personen.split(' - ')[0] if ' - ' in personen else personen
-                # Auf max 50 Zeichen begrenzen
-                if len(restaurant) > 50:
-                    restaurant = restaurant[:47] + '...'
-                table_data.append([exp.get('datum', ''), restaurant, f"{betrag:.2f} €"])
+                # Auf max 45 Zeichen begrenzen
+                if len(restaurant) > 45:
+                    restaurant = restaurant[:42] + '...'
+                table_data.append([str(beleg_nr), exp.get('datum', ''), restaurant, f"{betrag:.2f} €"])
+                beleg_nr += 1
         else:
-            table_data = [['Datum', 'Beschreibung', 'Betrag']]
+            table_data = [['Nr.', 'Datum', 'Beschreibung', 'Betrag']]
             for exp in cat_expenses:
                 betrag = float(exp.get('betrag', 0) or 0)
                 cat_sum += betrag
-                table_data.append([exp.get('datum', '') or exp.get('monat', ''), 
+                table_data.append([str(beleg_nr), exp.get('datum', '') or exp.get('monat', ''),
                                   exp.get('beschreibung', ''), f"{betrag:.2f} €"])
-        
-        table_data.append(['', '', 'Summe:', f"{cat_sum:.2f} €"] if len(table_data[0]) == 4
-                         else ['', 'Summe:', f"{cat_sum:.2f} €"] if len(table_data[0]) == 3
-                         else ['', '', '', 'Summe:', f"{cat_sum:.2f} €"])
+                beleg_nr += 1
+
+        table_data.append(['', '', '', 'Summe:', f"{cat_sum:.2f} €"] if len(table_data[0]) == 5
+                         else ['', '', 'Summe:', f"{cat_sum:.2f} €"] if len(table_data[0]) == 4
+                         else ['', '', '', '', 'Summe:', f"{cat_sum:.2f} €"])
 
         # Volle Seitenbreite: A4 = 210mm, minus 30mm Ränder = 180mm
         page_width = 180*mm
         num_cols = len(table_data[0])
         if cat_key == 'fahrtkosten_kfz':
-            # Datum, Fahrstrecke, Anlaß, km, Betrag
-            col_widths = [25*mm, 50*mm, 70*mm, 15*mm, 20*mm]
+            # Nr., Datum, Fahrstrecke, Anlaß, km, Betrag
+            col_widths = [12*mm, 22*mm, 45*mm, 68*mm, 13*mm, 20*mm]
         elif cat_key == 'sonstiges':
-            # Typ, Datum, Ort, Betrag
-            col_widths = [30*mm, 25*mm, 100*mm, 25*mm]
+            # Nr., Typ, Datum, Ort, Betrag
+            col_widths = [12*mm, 25*mm, 22*mm, 96*mm, 25*mm]
         elif cat_key == 'bewirtung':
-            # Datum, Personen, Betrag
-            col_widths = [25*mm, 130*mm, 25*mm]
+            # Nr., Datum, Restaurant, Betrag
+            col_widths = [12*mm, 22*mm, 121*mm, 25*mm]
         else:
-            # Datum, Beschreibung, Betrag
-            col_widths = [25*mm, 130*mm, 25*mm]
+            # Nr., Datum, Beschreibung, Betrag
+            col_widths = [12*mm, 22*mm, 121*mm, 25*mm]
         t = Table(table_data, colWidths=col_widths)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333333')),
@@ -1493,27 +1504,33 @@ def export_zip():
         pdf_buffer = generate_pdf_buffer(meta, expenses)
         zf.writestr(f"Spesen_{monat.replace(' ', '_')}.pdf", pdf_buffer.getvalue())
 
-        # 3. Original-Belege sammeln (per file_hash)
+        # 3. Original-Belege sammeln (per file_hash) mit fortlaufender Nummerierung
         cache = {}
         if os.path.exists(CACHE_FILE):
             with open(CACHE_FILE, 'r') as f:
                 cache = json.load(f)
 
-        beleg_count = 0
-        for cat_key, cat_expenses in expenses.items():
+        beleg_nr = 1  # Fortlaufende Belegnummer für Dateinamen
+        for cat_key in CATEGORIES.keys():
+            cat_expenses = expenses.get(cat_key, [])
+            # Nach Datum sortieren (gleiche Reihenfolge wie in Excel/PDF)
+            cat_expenses = sort_expenses_by_date(cat_expenses)
+
             for exp in cat_expenses:
                 file_hash = exp.get('file_hash')
-                if not file_hash or file_hash not in cache:
-                    continue
+                if file_hash and file_hash in cache:
+                    cache_entry = cache[file_hash]
+                    datei_pfad = cache_entry.get('datei_pfad')
+                    datei_name = cache_entry.get('datei', f'beleg_{beleg_nr}.pdf')
 
-                cache_entry = cache[file_hash]
-                datei_pfad = cache_entry.get('datei_pfad')
-                datei_name = cache_entry.get('datei', f'beleg_{beleg_count}.pdf')
+                    if datei_pfad and os.path.exists(datei_pfad):
+                        # Dateiendung extrahieren
+                        _, ext = os.path.splitext(datei_name)
+                        # Beleg mit Nummer-Präfix ins ZIP hinzufügen
+                        numbered_name = f"{beleg_nr:02d}_{datei_name}"
+                        zf.write(datei_pfad, f"Belege/{numbered_name}")
 
-                if datei_pfad and os.path.exists(datei_pfad):
-                    # Beleg ins ZIP hinzufügen (in Unterordner "Belege")
-                    zf.write(datei_pfad, f"Belege/{datei_name}")
-                    beleg_count += 1
+                beleg_nr += 1  # Nummer erhöhen für jeden Eintrag (auch ohne Beleg)
 
         # 4. Bewirtungsbelege aus dem Export-Ordner hinzufügen
         bewirtungsbelege_dir = get_export_dir(monat, subfolder='bewirtungsbelege')
