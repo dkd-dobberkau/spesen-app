@@ -613,6 +613,21 @@ def add_person():
         conn.commit()
         return jsonify({'success': True, 'id': cursor.lastrowid})
 
+@app.route('/api/personen/<int:person_id>', methods=['PUT'])
+def update_person(person_id):
+    """Aktualisiert eine Person."""
+    data = request.json
+    name = data.get('name', '').strip()
+    firma = data.get('firma', '').strip()
+
+    if not name:
+        return jsonify({'error': 'Name ist erforderlich'}), 400
+
+    with get_db() as conn:
+        conn.execute('UPDATE personen SET name = ?, firma = ? WHERE id = ?', (name, firma, person_id))
+        conn.commit()
+        return jsonify({'success': True})
+
 @app.route('/api/personen/<int:person_id>', methods=['DELETE'])
 def delete_person(person_id):
     """Löscht eine Person."""
@@ -620,6 +635,89 @@ def delete_person(person_id):
         conn.execute('DELETE FROM personen WHERE id = ?', (person_id,))
         conn.commit()
         return jsonify({'success': True})
+
+@app.route('/api/personen/import-vcf', methods=['POST'])
+def import_vcf():
+    """Importiert Personen aus VCF-Datei."""
+    if 'vcf' not in request.files:
+        return jsonify({'error': 'Keine VCF-Datei hochgeladen'}), 400
+
+    vcf_file = request.files['vcf']
+    if vcf_file.filename == '':
+        return jsonify({'error': 'Keine Datei ausgewählt'}), 400
+
+    try:
+        content = vcf_file.read().decode('utf-8', errors='replace')
+
+        # VCF Parser
+        imported = []
+        skipped = 0
+
+        # VCF kann mehrere vCards enthalten
+        vcards = content.split('BEGIN:VCARD')
+
+        for vcard in vcards:
+            if not vcard.strip():
+                continue
+
+            name = None
+            firma = None
+
+            # Parse vCard Felder
+            for line in vcard.split('\n'):
+                line = line.strip()
+
+                # Name aus FN (Formatted Name) oder N
+                if line.startswith('FN:') or line.startswith('FN;'):
+                    # FN kann encoding haben: FN;CHARSET=UTF-8:Name
+                    name = line.split(':', 1)[-1].strip()
+                elif line.startswith('N:') or line.startswith('N;'):
+                    # N Format: Nachname;Vorname;...
+                    n_parts = line.split(':', 1)[-1].split(';')
+                    if len(n_parts) >= 2:
+                        nachname = n_parts[0].strip()
+                        vorname = n_parts[1].strip()
+                        if not name and (nachname or vorname):
+                            name = f"{vorname} {nachname}".strip()
+
+                # Organisation
+                if line.startswith('ORG:') or line.startswith('ORG;'):
+                    firma = line.split(':', 1)[-1].split(';')[0].strip()
+
+                # Titel als Alternative für Firma
+                if not firma and (line.startswith('TITLE:') or line.startswith('TITLE;')):
+                    firma = line.split(':', 1)[-1].strip()
+
+            if name:
+                imported.append({'name': name, 'firma': firma or ''})
+            else:
+                skipped += 1
+
+        # In Datenbank speichern (Duplikate vermeiden)
+        added = 0
+        with get_db() as conn:
+            existing = {row['name'].lower() for row in conn.execute('SELECT name FROM personen').fetchall()}
+
+            for person in imported:
+                if person['name'].lower() not in existing:
+                    conn.execute('INSERT INTO personen (name, firma) VALUES (?, ?)',
+                               (person['name'], person['firma']))
+                    existing.add(person['name'].lower())
+                    added += 1
+                else:
+                    skipped += 1
+
+            conn.commit()
+
+        return jsonify({
+            'success': True,
+            'imported': added,
+            'skipped': skipped,
+            'total': len(imported)
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Fehler beim Parsen: {str(e)}'}), 400
 
 # API: Beleg per Hash abrufen
 @app.route('/api/beleg/<file_hash>', methods=['GET'])

@@ -117,6 +117,7 @@
             <a href="#" class="brand-logo center">Spesenabrechnung</a>
             <ul class="right">
                 <li><a href="#!" onclick="openBelegScanner()" title="Beleg scannen"><i class="material-icons">document_scanner</i></a></li>
+                <li><a href="#!" onclick="openPersonen()" title="Personen verwalten"><i class="material-icons">people</i></a></li>
                 <li><a href="#!" onclick="openSettings()" title="Einstellungen"><i class="material-icons">settings</i></a></li>
             </ul>
         </div>
@@ -526,17 +527,52 @@
                 </div>
             </div>
 
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Abbrechen</a>
+            <a href="#!" class="btn waves-effect waves-light" onclick="saveSettings()">
+                <i class="material-icons left">save</i>Speichern
+            </a>
+        </div>
+    </div>
+
+    <!-- Personen-Modal -->
+    <div id="personen-modal" class="modal modal-fixed-footer" style="max-height: 85%;">
+        <div class="modal-content">
+            <h4><i class="material-icons left">people</i>Personen verwalten</h4>
+            <p class="grey-text">Häufig bewirtete Personen für schnelle Auswahl bei Bewirtungsbelegen.</p>
+
+            <!-- VCF Import -->
+            <div class="row" style="margin-top: 20px;">
+                <div class="col s12">
+                    <div class="file-field input-field">
+                        <div class="btn btn-small blue">
+                            <span><i class="material-icons left">upload_file</i>VCF importieren</span>
+                            <input type="file" id="vcf-upload" accept=".vcf,.vcard">
+                        </div>
+                        <div class="file-path-wrapper">
+                            <input class="file-path validate" type="text" placeholder="Kontakte aus VCF-Datei importieren...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Personen-Liste -->
             <h5>Gespeicherte Personen</h5>
-            <p class="grey-text" style="font-size: 0.9em;">Häufig bewirtete Personen für schnelle Auswahl</p>
-            <div id="personen-liste" style="margin-bottom: 15px;">
+            <div id="personen-liste" style="margin-bottom: 15px; max-height: 300px; overflow-y: auto;">
                 <p class="grey-text center">Lade Personen...</p>
             </div>
+
+            <!-- Neue Person hinzufügen -->
+            <h5>Person hinzufügen</h5>
             <div class="row">
                 <div class="input-field col s5">
-                    <input id="neue-person-name" type="text" placeholder="Name">
+                    <input id="neue-person-name" type="text" placeholder=" ">
+                    <label for="neue-person-name">Name</label>
                 </div>
                 <div class="input-field col s5">
-                    <input id="neue-person-firma" type="text" placeholder="Firma/Funktion">
+                    <input id="neue-person-firma" type="text" placeholder=" ">
+                    <label for="neue-person-firma">Firma/Funktion</label>
                 </div>
                 <div class="col s2" style="padding-top: 15px;">
                     <a href="#!" class="btn-small waves-effect waves-light" onclick="addNewPerson()">
@@ -546,10 +582,7 @@
             </div>
         </div>
         <div class="modal-footer">
-            <a href="#!" class="modal-close btn-flat">Abbrechen</a>
-            <a href="#!" class="btn waves-effect waves-light" onclick="saveSettings()">
-                <i class="material-icons left">save</i>Speichern
-            </a>
+            <a href="#!" class="modal-close btn-flat">Schließen</a>
         </div>
     </div>
 
@@ -1121,10 +1154,18 @@
             // Unterschrift laden
             loadUnterschrift();
 
-            // Personen laden
-            loadPersonen();
-
             const modal = M.Modal.getInstance(document.getElementById('settings-modal'));
+            modal.open();
+        }
+
+        function openPersonen() {
+            // Felder leeren
+            document.getElementById('neue-person-name').value = '';
+            document.getElementById('neue-person-firma').value = '';
+            M.updateTextFields();
+
+            loadPersonen();
+            const modal = M.Modal.getInstance(document.getElementById('personen-modal'));
             modal.open();
         }
 
@@ -1158,6 +1199,38 @@
                         reader.readAsDataURL(file);
                     } else {
                         M.toast({html: 'Bitte nur PNG-Dateien', classes: 'rounded orange'});
+                    }
+                });
+            }
+
+            // VCF Upload Handler
+            const vcfUploadInput = document.getElementById('vcf-upload');
+            if (vcfUploadInput) {
+                vcfUploadInput.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const formData = new FormData();
+                        formData.append('vcf', file);
+
+                        fetch('/api/personen/import-vcf', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                loadPersonen();
+                                M.toast({html: `${data.imported} Personen importiert (${data.skipped} übersprungen)`, classes: 'rounded green'});
+                            } else {
+                                M.toast({html: data.error || 'Import fehlgeschlagen', classes: 'rounded red'});
+                            }
+                            // Input zurücksetzen
+                            vcfUploadInput.value = '';
+                        })
+                        .catch(err => {
+                            M.toast({html: 'Fehler beim Import: ' + err.message, classes: 'rounded red'});
+                            vcfUploadInput.value = '';
+                        });
                     }
                 });
             }
@@ -1204,17 +1277,80 @@
 
             let html = '<div class="collection">';
             gespeichertePersonen.forEach(p => {
+                const escapedName = p.name.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+                const escapedFirma = (p.firma || '').replace(/'/g, "\\'").replace(/"/g, "&quot;");
                 html += `
-                    <div class="collection-item">
-                        <span><strong>${p.name}</strong>${p.firma ? ' - ' + p.firma : ''}</span>
-                        <a href="#!" class="secondary-content" onclick="deletePerson(${p.id})">
-                            <i class="material-icons grey-text">delete</i>
-                        </a>
+                    <div class="collection-item" id="person-row-${p.id}" style="display: flex; align-items: center; padding: 10px 15px;">
+                        <span class="person-display" style="flex: 1;"><strong>${p.name}</strong>${p.firma ? ' - ' + p.firma : ''}</span>
+                        <div class="person-edit" style="display: none; flex: 1; gap: 10px;">
+                            <input type="text" id="edit-name-${p.id}" value="${escapedName}" style="margin: 0; height: 2rem; width: 45%;">
+                            <input type="text" id="edit-firma-${p.id}" value="${escapedFirma}" placeholder="Firma" style="margin: 0; height: 2rem; width: 45%;">
+                        </div>
+                        <div class="person-actions" style="display: flex; gap: 5px;">
+                            <a href="#!" class="btn-edit" onclick="editPerson(${p.id})" title="Bearbeiten">
+                                <i class="material-icons grey-text">edit</i>
+                            </a>
+                            <a href="#!" class="btn-save" onclick="savePerson(${p.id})" title="Speichern" style="display: none;">
+                                <i class="material-icons green-text">check</i>
+                            </a>
+                            <a href="#!" class="btn-cancel" onclick="cancelEditPerson(${p.id})" title="Abbrechen" style="display: none;">
+                                <i class="material-icons orange-text">close</i>
+                            </a>
+                            <a href="#!" class="btn-delete" onclick="deletePerson(${p.id})" title="Löschen">
+                                <i class="material-icons grey-text">delete</i>
+                            </a>
+                        </div>
                     </div>
                 `;
             });
             html += '</div>';
             liste.innerHTML = html;
+        }
+
+        function editPerson(id) {
+            const row = document.getElementById(`person-row-${id}`);
+            row.querySelector('.person-display').style.display = 'none';
+            row.querySelector('.person-edit').style.display = 'flex';
+            row.querySelector('.btn-edit').style.display = 'none';
+            row.querySelector('.btn-delete').style.display = 'none';
+            row.querySelector('.btn-save').style.display = 'inline';
+            row.querySelector('.btn-cancel').style.display = 'inline';
+            document.getElementById(`edit-name-${id}`).focus();
+        }
+
+        function cancelEditPerson(id) {
+            const row = document.getElementById(`person-row-${id}`);
+            row.querySelector('.person-display').style.display = 'inline';
+            row.querySelector('.person-edit').style.display = 'none';
+            row.querySelector('.btn-edit').style.display = 'inline';
+            row.querySelector('.btn-delete').style.display = 'inline';
+            row.querySelector('.btn-save').style.display = 'none';
+            row.querySelector('.btn-cancel').style.display = 'none';
+        }
+
+        function savePerson(id) {
+            const name = document.getElementById(`edit-name-${id}`).value.trim();
+            const firma = document.getElementById(`edit-firma-${id}`).value.trim();
+
+            if (!name) {
+                M.toast({html: 'Name ist erforderlich', classes: 'rounded orange'});
+                return;
+            }
+
+            fetch(`/api/personen/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, firma })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    loadPersonen();
+                    M.toast({html: 'Person aktualisiert', classes: 'rounded green'});
+                } else {
+                    M.toast({html: data.error || 'Fehler beim Speichern', classes: 'rounded red'});
+                }
+            });
         }
 
         function addNewPerson() {
