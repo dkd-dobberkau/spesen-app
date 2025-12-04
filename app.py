@@ -148,20 +148,34 @@ def save_cache(cache):
         print(f"Cache konnte nicht gespeichert werden: {e}")
 
 
-# Encryption key - in production, store this securely (e.g., environment variable)
-KEY_FILE = 'secret.key'
+# Encryption key - aus Umgebungsvariable oder Fallback auf Datei
+def get_encryption_key():
+    # Priorität 1: Umgebungsvariable
+    env_key = os.environ.get('ENCRYPTION_KEY')
+    if env_key:
+        # Key kann als base64-String in .env gespeichert sein
+        return env_key.encode() if isinstance(env_key, str) else env_key
 
-def get_or_create_key():
-    if os.path.exists(KEY_FILE):
-        with open(KEY_FILE, 'rb') as f:
+    # Priorität 2: Bestehende Key-Datei (für Abwärtskompatibilität)
+    key_file = os.path.join(DATA_DIR, 'secret.key')
+    if os.path.exists(key_file):
+        with open(key_file, 'rb') as f:
             return f.read()
-    else:
-        key = Fernet.generate_key()
-        with open(KEY_FILE, 'wb') as f:
-            f.write(key)
-        return key
 
-ENCRYPTION_KEY = get_or_create_key()
+    # Priorität 3: Neuen Key generieren und Warnung ausgeben
+    key = Fernet.generate_key()
+    print(f"⚠️  WARNUNG: Kein ENCRYPTION_KEY in .env gefunden!")
+    print(f"   Generierter Key (bitte in .env speichern):")
+    print(f"   ENCRYPTION_KEY={key.decode()}")
+
+    # Key auch in Datei speichern als Backup
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(key_file, 'wb') as f:
+        f.write(key)
+
+    return key
+
+ENCRYPTION_KEY = get_encryption_key()
 cipher = Fernet(ENCRYPTION_KEY)
 
 def encrypt_data(data):
