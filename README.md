@@ -20,18 +20,31 @@ Automatische Spesenabrechnung mit KI-gestützter Belegerkennung.
 ### Mit Docker (empfohlen)
 
 ```bash
-# .env erstellen
-cp .env.example .env
-# ANTHROPIC_API_KEY in .env eintragen
+# Setup-Script ausführen (erstellt Ordner, .env, Keys)
+./setup.sh
 
 # Container starten
 docker compose up -d
+
+# Tests ausführen
+./test.sh
 
 # Web-App: http://localhost (Port 80)
 
 # Belege verarbeiten (mit Archivierung)
 docker compose exec app python cli.py /app/belege/inbox \
     --name "Max Mustermann" --monat "Dez 2025" --archive
+```
+
+### Manuelle Installation
+
+```bash
+# .env erstellen
+cp .env.example .env
+# ANTHROPIC_API_KEY in .env eintragen
+
+# Container starten
+docker compose up -d
 ```
 
 ### Mit uv (lokal)
