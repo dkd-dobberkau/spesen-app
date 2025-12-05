@@ -1,44 +1,6 @@
 services:
-  # Traefik Reverse Proxy
-  traefik:
-    image: traefik:v3.2
-    container_name: spesen-traefik
-    command:
-      - "--api.dashboard=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      # Let's Encrypt (auskommentiert - für Production aktivieren)
-      # - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
-      # - "--certificatesresolvers.letsencrypt.acme.email=your-email@example.com"
-      # - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      # HTTP -> HTTPS redirect (für Production aktivieren)
-      # - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      # - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--log.level=INFO"
-      - "--accesslog=true"
-      - "--accesslog.filepath=/var/log/traefik/access.log"
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"  # Traefik Dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/letsencrypt:/letsencrypt
-      - ./traefik/logs:/var/log/traefik
-    networks:
-      - spesen-network
-    restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      # Dashboard (Basic Auth empfohlen für Production)
-      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
-      - "traefik.http.routers.dashboard.service=api@internal"
-      - "traefik.http.routers.dashboard.entrypoints=web"
-
   # Spesen App
-  app:
+  spesen:
     build: .
     container_name: spesen-app
     volumes:
@@ -61,10 +23,8 @@ services:
     env_file:
       - .env
     networks:
-      - spesen-network
+      - traefik-proxy
     restart: unless-stopped
-    depends_on:
-      - traefik
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -74,16 +34,12 @@ services:
     labels:
       - "traefik.enable=true"
       # HTTP Router
-      - "traefik.http.routers.spesen.rule=Host(`spesen.localhost`) || Host(`localhost`)"
+      - "traefik.http.routers.spesen.rule=Host(`spesen.localhost`)"
       - "traefik.http.routers.spesen.entrypoints=web"
       - "traefik.http.services.spesen.loadbalancer.server.port=5000"
-      # HTTPS Router (für Production aktivieren)
-      # - "traefik.http.routers.spesen-secure.rule=Host(`spesen.yourdomain.com`)"
-      # - "traefik.http.routers.spesen-secure.entrypoints=websecure"
-      # - "traefik.http.routers.spesen-secure.tls.certresolver=letsencrypt"
 
   # Optional: CLI als separater Service für Batch-Jobs
-  cli:
+  spesen-cli:
     build: .
     container_name: spesen-cli
     volumes:
@@ -98,12 +54,12 @@ services:
     env_file:
       - .env
     networks:
-      - spesen-network
+      - traefik-proxy
     profiles:
       - cli
     entrypoint: ["python", "cli.py"]
     command: ["--help"]
 
 networks:
-  spesen-network:
-    driver: bridge
+  traefik-proxy:
+    external: true
